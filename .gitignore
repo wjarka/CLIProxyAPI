@@ -67,3 +67,7 @@ docker-compose.override.yml
 
 # Local LLM Wiki vault
 .llm-wiki
+
+# Fork documentation and intentionally credential-free example.
+!docs/reset-aware-routing.md
+!examples/reset-aware/config.yaml
