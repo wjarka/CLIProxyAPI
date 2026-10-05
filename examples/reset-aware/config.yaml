@@ -1,0 +1,21 @@
+# Copy to config.yaml and replace both keys before starting.
+config-version: 8
+server:
+  host: "127.0.0.1"
+  port: 8317
+management:
+  allow-remote: false
+  secret-key: "REPLACE_WITH_A_SEPARATE_MANAGEMENT_SECRET"
+access:
+  api-keys:
+    - "REPLACE_WITH_A_CLIENT_SECRET"
+oauth:
+  auth-dir: "~/.cli-proxy-api"
+routing:
+  strategy: earliest-reset
+  session-affinity: true
+  session-affinity-ttl: "1h"
+  session-affinity-subagents: true
+observability:
+  usage:
+    usage-statistics-enabled: true

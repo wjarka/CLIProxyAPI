@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width, initial-scale=1"
+  />
+  <title>Account quotas · CLIProxyAPI</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font: 15px system-ui;
+      background: #101419;
+      color: #edf2f7;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      max-width: 1250px;
+      margin: 0 auto;
+      padding: 40px 24px;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 20px;
+    }
+    h1 {
+      font-size: 32px;
+      letter-spacing: -1px;
+      margin: 8px 0;
+    }
+    p,
+    .muted {
+      color: #9eaebc;
+    }
+    .eyebrow {
+      color: #83dbb6;
+      font-size: 12px;
+      letter-spacing: 2px;
+    }
+    a {
+      color: #83dbb6;
+    }
+    button,
+    input,
+    select {
+      font: inherit;
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid #3c4a58;
+      background: #1b242e;
+      color: inherit;
+    }
+    button {
+      cursor: pointer;
+    }
+    button:hover {
+      border-color: #83dbb6;
+    }
+    input {
+      min-width: 260px;
+    }
+    #connect {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin: 28px 0;
+    }
+    .toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin: 30px 0 15px;
+      gap: 16px;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+    .stat {
+      background: #19212a;
+      padding: 22px;
+      border-radius: 12px;
+      border: 1px solid #2c3845;
+    }
+    .stat strong {
+      display: block;
+      font-size: 28px;
+      margin: 8px 0;
+    }
+    .table {
+      overflow-x: auto;
+      border: 1px solid #2c3845;
+      border-radius: 12px;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      text-align: left;
+      white-space: nowrap;
+    }
+    th,
+    td {
+      padding: 18px 16px;
+      border-bottom: 1px solid #2c3845;
+    }
+    th {
+      font-size: 12px;
+      color: #9eaebc;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    td small {
+      display: block;
+      color: #9eaebc;
+      margin-top: 7px;
+    }
+    meter {
+      width: 120px;
+      height: 12px;
+      display: block;
+      margin-top: 6px;
+      accent-color: #83dbb6;
+    }
+    .bad {
+      color: #ffb79d;
+    }
+    #status {
+      min-height: 24px;
+    }
+    #empty {
+      padding: 32px;
+      text-align: center;
+    }
+    .footnote {
+      font-size: 13px;
+      line-height: 1.7;
+    }
+    @media (max-width: 700px) {
+      body {
+        padding: 24px 16px;
+      }
+      header {
+        align-items: flex-start;
+      }
+      .summary {
+        grid-template-columns: 1fr;
+      }
+      .toolbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+    }
+  </style>
+  <header>
+    <div>
+      <div class="eyebrow">CLIPROXYAPI / ACCOUNTS</div>
+      <h1>Make every window count.</h1>
+      <p>Usage, reset times and transport health in one place.</p>
+    </div>
+    <a href="/management.html">Manage accounts ↗</a>
+  </header>
+  <form id="connect">
+    <input
+      id="key"
+      type="password"
+      autocomplete="off"
+      placeholder="Management key"
+      aria-label="Management key"
+      required
+    /><button>Connect</button
+    ><button id="disconnect" type="button" hidden>Disconnect</button>
+  </form>
+  <p id="status" role="status">
+    Connect to load your accounts. The key stays in this page’s memory.
+  </p>
+  <div class="summary">
+    <div class="stat">
+      Connected accounts<strong id="count">—</strong
+      ><span class="muted">Claude + Codex</span>
+    </div>
+    <div class="stat">
+      Available accounts<strong id="ready">—</strong
+      ><span class="muted">Not disabled or in cooldown</span>
+    </div>
+    <div class="stat">
+      Next weekly reset<strong id="next">—</strong
+      ><span class="muted">From observed provider responses</span>
+    </div>
+  </div>
+  <div class="toolbar">
+    <div>
+      <select id="provider" aria-label="Provider">
+        <option value="">All providers</option>
+        <option value="claude">Claude</option>
+        <option value="codex">Codex</option>
+      </select>
+      <select id="bucket" aria-label="Weekly routing window">
+        <option value="weekly_reset_at">Shared weekly window</option>
+        <option value="fable_reset_at">Fable weekly window</option>
+      </select>
+    </div>
+    <button id="refresh" disabled>Refresh</button>
+  </div>
+  <div class="table">
+    <table>
+      <thead>
+        <tr>
+          <th>Account</th>
+          <th>Short window</th>
+          <th>Weekly window</th>
+          <th>Next reset</th>
+          <th>Transport</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div id="empty">No account data loaded.</div>
+  </div>
+  <p class="footnote">
+    Usage is a passive snapshot from proxy traffic, not a live provider poll.
+    Refresh reloads the proxy’s observations. Unknown or expired values are
+    shown as unavailable. Routing considers account eligibility and priorities
+    before reset times; existing session bindings take precedence.
+    Fable-specific limits appear separately from the shared weekly limit.
+  </p>
+  <script>
+    "use strict";
+    const $ = (id) => document.getElementById(id);
+    let token = "",
+      accounts = [],
+      timer = null,
+      busy = false,
+      generation = 0;
+    const date = (v) => {
+      const d = new Date(v);
+      return Number.isFinite(d.getTime()) && d.getFullYear() > 2000 ? d : null;
+    };
+    const remaining = (v) => {
+      const d = date(v);
+      if (!d) return "Unknown";
+      const m = Math.ceil((d - Date.now()) / 60000);
+      if (m <= 0) return "Awaiting observation";
+      return m >= 1440
+        ? `${Math.floor(m / 1440)}d ${Math.floor((m % 1440) / 60)}h`
+        : m >= 60
+          ? `${Math.floor(m / 60)}h ${m % 60}m`
+          : `${m}m`;
+    };
+    function cell(row, text, detail) {
+      const td = document.createElement("td");
+      td.textContent = text;
+      if (detail) {
+        const s = document.createElement("small");
+        s.textContent = detail;
+        td.append(s);
+      }
+      row.append(td);
+      return td;
+    }
+    function windowData(a, weekly) {
+      const observed = date(a.quota?.observed_at);
+      if (!observed || observed > new Date() || Date.now() - observed > 86400000)
+        return null;
+      const s = Object.fromEntries(
+        Object.entries(a.quota?.signals || {}).map(([k, v]) => [
+          k.toLowerCase(),
+          v,
+        ]),
+      );
+      let prefix,
+        scale = 1;
+      if (a.provider === "claude") {
+        prefix =
+          "anthropic-ratelimit-unified-" +
+          (weekly
+            ? $("bucket").value === "fable_reset_at" &&
+              s["anthropic-ratelimit-unified-7d_oi-utilization"] !== undefined
+              ? "7d_oi"
+              : "7d"
+            : "5h") +
+          "-";
+        scale = 100;
+      } else {
+        const w = ["primary", "secondary"].find(
+          (x) =>
+            Number(s[`x-codex-${x}-window-minutes`]) === (weekly ? 10080 : 300),
+        );
+        if (!w) return null;
+        prefix = `x-codex-${w}-`;
+      }
+      const raw =
+        s[prefix + (a.provider === "claude" ? "utilization" : "used-percent")];
+      if (raw === undefined || raw === "") return null;
+      const used = Number(raw) * scale;
+      if (!Number.isFinite(used) || used < 0) return null;
+      let reset = s[prefix + (a.provider === "claude" ? "reset" : "reset-at")];
+      if (reset && /^\d+$/.test(reset))
+        reset = date(Number(reset) * 1000)?.toISOString();
+      if (
+        !reset &&
+        s[prefix + "reset-after-seconds"] &&
+        date(a.quota?.observed_at)
+      )
+        reset = date(
+          date(a.quota.observed_at).getTime() +
+            Number(s[prefix + "reset-after-seconds"]) * 1000,
+        )?.toISOString();
+      if (reset && date(reset) && date(reset) <= new Date()) return null;
+      return { used, reset };
+    }
+    function render() {
+      const rows = $("rows");
+      rows.replaceChildren();
+      const key = $("bucket").value;
+      const reset = (a) => a[key] || a.weekly_reset_at;
+      const list = accounts
+        .filter(
+          (a) => !$("provider").value || a.provider === $("provider").value,
+        )
+        .sort(
+          (a, b) =>
+            (date(reset(a))?.getTime() || Infinity) -
+            (date(reset(b))?.getTime() || Infinity),
+        );
+      $("count").textContent = accounts.length;
+      $("ready").textContent = accounts.filter(
+        (a) => !a.disabled && !a.unavailable,
+      ).length;
+      const next = list.find((a) => date(reset(a)) > new Date());
+      $("next").textContent = next ? remaining(reset(next)) : "Unknown";
+      $("empty").hidden = list.length > 0;
+      $("empty").textContent =
+        "No matching accounts. Add accounts in Management.";
+      for (const a of list) {
+        const tr = document.createElement("tr");
+        cell(
+          tr,
+          a.label,
+          `${a.provider} · ${a.disabled ? "disabled" : a.unavailable ? "cooldown" : a.status}`,
+        );
+        for (const weekly of [false, true]) {
+          const w = windowData(a, weekly);
+          const td = cell(
+            tr,
+            w ? `${Math.max(0, 100 - w.used).toFixed(1)}% left` : "Unknown",
+            w?.reset ? `Resets in ${remaining(w.reset)}` : "",
+          );
+          if (w) {
+            const meter = document.createElement("meter");
+            meter.min = 0;
+            meter.max = 100;
+            meter.value = Math.max(0, 100 - w.used);
+            meter.setAttribute("aria-label", "Quota remaining");
+            td.append(meter);
+          }
+        }
+        cell(tr, remaining(reset(a)), date(reset(a))?.toLocaleString());
+        cell(
+          tr,
+          a.provider === "codex"
+            ? a.websockets
+              ? "WebSocket enabled"
+              : "HTTP / WS off"
+            : "HTTP streaming",
+          a.quota?.observed_at
+            ? `Observed ${new Date(a.quota.observed_at).toLocaleString()}`
+            : "No observations yet",
+        );
+        rows.append(tr);
+      }
+    }
+    async function refresh() {
+      if (!token || busy) return;
+      busy = true;
+      const current = generation;
+      $("refresh").disabled = true;
+      try {
+        const r = await fetch("/v8/management/credentials/quota-overview", {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        });
+        if (!r.ok)
+          throw Error(
+            `Could not load accounts (HTTP ${r.status}). Check the management key and remote-access configuration.`,
+          );
+        const data = await r.json();
+        if (current !== generation) return;
+        accounts = data.accounts || [];
+        render();
+        $("status").textContent =
+          `Updated ${new Date().toLocaleTimeString()} · refreshes every 30 seconds`;
+        $("status").className = "";
+        $("disconnect").hidden = false;
+      } catch (e) {
+        if (current === generation) {
+          $("status").textContent = e.message;
+          $("status").className = "bad";
+        }
+      } finally {
+        busy = false;
+        $("refresh").disabled = !token;
+      }
+    }
+    $("connect").addEventListener("submit", (e) => {
+      e.preventDefault();
+      token = $("key").value.trim();
+      $("key").value = "";
+      generation++;
+      clearInterval(timer);
+      refresh();
+      timer = setInterval(refresh, 30000);
+    });
+    $("refresh").onclick = refresh;
+    for (const id of ["provider", "bucket"]) $(id).onchange = render;
+    $("disconnect").onclick = () => {
+      generation++;
+      token = "";
+      accounts = [];
+      clearInterval(timer);
+      render();
+      $("refresh").disabled = true;
+      $("disconnect").hidden = true;
+      $("status").textContent = "Disconnected. Management key cleared.";
+    };
+  </script>
+</html>
