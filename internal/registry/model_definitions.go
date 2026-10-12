@@ -7,6 +7,7 @@ import (
 )
 
 const (
+	claudeHaiku55ModelID               = "claude-haiku-5-5"
 	codexBuiltinImage15ModelID         = "gpt-image-1.5"
 	codexBuiltinImageModelID           = "gpt-image-2"
 	codexBuiltinImage25FlareModelID    = "gpt-image-2.5-flare"
@@ -39,7 +40,29 @@ type staticModelsJSON struct {
 
 // GetClaudeModels returns the standard Claude model definitions.
 func GetClaudeModels() []*ModelInfo {
-	return cloneModelInfos(getModels().Claude)
+	models := cloneModelInfos(getModels().Claude)
+	for _, model := range models {
+		if model != nil && model.ID == claudeHaiku55ModelID {
+			return models
+		}
+	}
+	return append(models, &ModelInfo{
+		ID:                  claudeHaiku55ModelID,
+		Object:              "model",
+		Created:             1791331200, // 2026-10-07
+		OwnedBy:             "anthropic",
+		Type:                "claude",
+		DisplayName:         "Claude Haiku 5.5",
+		ContextLength:       1000000,
+		MaxCompletionTokens: 128000,
+		Thinking: &ThinkingSupport{
+			ZeroAllowed:    true,
+			DynamicAllowed: true,
+			Levels:         []string{"low", "medium", "high", "xhigh", "max"},
+		},
+		SupportedInputModalities:  []string{"text", "image"},
+		SupportedOutputModalities: []string{"text"},
+	})
 }
 
 // GetGeminiModels returns the standard Gemini model definitions.
