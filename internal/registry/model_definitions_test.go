@@ -6,6 +6,23 @@ import (
 	"testing"
 )
 
+func TestClaudeHaiku55SurvivesMissingCatalogEntry(t *testing.T) {
+	models := GetClaudeModels()
+	var haiku *ModelInfo
+	for _, model := range models {
+		if model.ID == "claude-haiku-5-5" {
+			haiku = model
+			break
+		}
+	}
+	if haiku == nil {
+		t.Fatal("Claude Haiku 5.5 is absent from the Claude model list")
+	}
+	if haiku.ContextLength != 1000000 || haiku.MaxCompletionTokens != 128000 {
+		t.Fatalf("unexpected Haiku 5.5 limits: context=%d output=%d", haiku.ContextLength, haiku.MaxCompletionTokens)
+	}
+}
+
 func TestCodexConfigurationUpdateCapability(t *testing.T) {
 	for _, tier := range []struct {
 		name    string
