@@ -148,7 +148,19 @@ func (w *responsesWebsocketWriter) closeWithoutError() (bool, error) {
 	if !w.closing.CompareAndSwap(false, true) {
 		return false, nil
 	}
-	return true, w.conn.Close()
+	// Do not wait behind a blocked data writer. Otherwise send a retryable close
+	// without exposing upstream details before releasing the transport.
+	if !w.writeMu.TryLock() {
+		return true, w.conn.Close()
+	}
+	defer w.writeMu.Unlock()
+
+	errWrite := w.conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseTryAgainLater, ""), time.Time{})
+	errClose := w.conn.Close()
+	if errWrite != nil {
+		return true, errWrite
+	}
+	return true, errClose
 }
 
 func (w *responsesWebsocketWriter) writePing() error {
@@ -176,9 +188,16 @@ func (w *responsesWebsocketWriter) closeWithPayload(payload []byte) (bool, error
 	defer w.writeMu.Unlock()
 
 	errWrite := w.conn.WriteMessage(websocket.TextMessage, payload)
+	var errCloseFrame error
+	if errWrite == nil {
+		errCloseFrame = w.conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""), time.Time{})
+	}
 	errClose := w.conn.Close()
 	if errWrite != nil {
 		return false, errWrite
+	}
+	if errCloseFrame != nil {
+		return true, errCloseFrame
 	}
 	return true, errClose
 }
