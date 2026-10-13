@@ -2832,6 +2832,7 @@ func TestCodexWebsockets_KeepalivePingDuringUpload_Sessionless(t *testing.T) {
 func TestCodexWebsockets_KeepalivePingDuringUpload_NonstreamSessionless(t *testing.T) {
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	serverPongCh := make(chan string, 1)
+	requestRead := make(chan struct{})
 	inWriteHook := make(chan struct{})
 	pongDeliveredDuringWrite := make(chan struct{})
 
@@ -2859,11 +2860,10 @@ func TestCodexWebsockets_KeepalivePingDuringUpload_NonstreamSessionless(t *testi
 		})
 
 		go func() {
-			for {
-				if _, _, errRead := conn.ReadMessage(); errRead != nil {
-					return
-				}
+			if _, _, errRead := conn.ReadMessage(); errRead != nil {
+				return
 			}
+			close(requestRead)
 		}()
 
 		// Wait until client has entered writeMessage on nonstream path.
@@ -2886,6 +2886,14 @@ func TestCodexWebsockets_KeepalivePingDuringUpload_NonstreamSessionless(t *testi
 			close(pongDeliveredDuringWrite)
 		case <-time.After(2 * time.Second):
 			t.Errorf("pong was not received while payload write was in progress on nonstream sessionless connection")
+			return
+		}
+
+		// A real upstream cannot complete a request before receiving its payload.
+		select {
+		case <-requestRead:
+		case <-time.After(2 * time.Second):
+			t.Error("timed out waiting for the nonstream request payload")
 			return
 		}
 

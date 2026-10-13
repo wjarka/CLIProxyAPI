@@ -3166,11 +3166,11 @@ func TestResponsesWebsocketHidesNonClientUpstreamDisconnectErrors(t *testing.T) 
 			if errRead == nil {
 				t.Fatalf("non-client upstream error was exposed: %s", payload)
 			}
-			// Nothing may be written downstream: no error frame and no close frame
-			// carrying proxy-internal detail, so the client just reconnects.
+			// Send a retryable close frame without exposing credential or transport
+			// details. Closing the socket alone looks like a protocol failure.
 			var closeErr *websocket.CloseError
-			if errors.As(errRead, &closeErr) && closeErr.Code != websocket.CloseAbnormalClosure {
-				t.Fatalf("non-client upstream error produced a close frame: %#v", closeErr)
+			if !errors.As(errRead, &closeErr) || closeErr.Code != websocket.CloseTryAgainLater || closeErr.Text != "" {
+				t.Fatalf("expected a retryable close without internal detail, got %v", errRead)
 			}
 		})
 	}
