@@ -350,6 +350,11 @@ type QuotaExceeded struct {
 
 // RoutingConfig configures how credentials are selected for requests.
 type RoutingConfig struct {
+	// ReservePolicies protect weekly capacity until scheduled release deadlines.
+	ReservePolicies map[string]ReservePolicy `yaml:"reserve-policies,omitempty" json:"reserve-policies,omitempty"`
+	// AccountPolicies bind stable credential IDs to named reserve policies.
+	AccountPolicies []AccountReservePolicy `yaml:"account-policies,omitempty" json:"account-policies,omitempty"`
+
 	// Strategy selects the credential selection strategy.
 	// Supported values: "round-robin" (default), "weighted-round-robin", "fill-first", "earliest-reset".
 	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty"`

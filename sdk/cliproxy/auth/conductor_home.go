@@ -952,6 +952,9 @@ func (m *Manager) pickHomeDispatchSelection(ctx context.Context, model string, o
 	if m == nil {
 		return nil, &Error{Code: "auth_not_found", Message: "no auth available"}
 	}
+	if m.hasReservePolicies() {
+		return nil, &Error{Code: "quota_reserve_unsupported", Message: "reserve policies require standalone execution", HTTPStatus: http.StatusServiceUnavailable}
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}

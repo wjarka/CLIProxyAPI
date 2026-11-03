@@ -12,6 +12,9 @@ import (
 // GetQuotaOverview exposes only account labels, health and quota observations.
 // Tokens, file paths and arbitrary auth metadata never enter this response.
 func (h *Handler) GetQuotaOverview(c *gin.Context) {
+	if h.authManager != nil && c.Request != nil {
+		h.authManager.RefreshReserveQuotas(c.Request.Context())
+	}
 	now := time.Now().UTC()
 	rows := make([]gin.H, 0)
 	if h.authManager != nil {
@@ -25,6 +28,9 @@ func (h *Handler) GetQuotaOverview(c *gin.Context) {
 				label = auth.ID
 			}
 			row := gin.H{"id": auth.ID, "label": label, "provider": auth.Provider, "disabled": auth.Disabled, "unavailable": unavailable, "status": status, "quota": quotaObservationPayload(auth.Quota)}
+			if reserve := h.authManager.QuotaReserveStatus(auth, now); reserve != nil {
+				row["reserve"] = reserve
+			}
 			if !retry.IsZero() {
 				row["retry_at"] = retry
 			}
@@ -39,6 +45,9 @@ func (h *Handler) GetQuotaOverview(c *gin.Context) {
 			if auth.Provider == "codex" {
 				enabled, _ := authWebsocketsValue(auth)
 				row["websockets"] = enabled
+			}
+			if reserve := h.authManager.QuotaReserveStatus(auth, now); reserve != nil && !reserve.ResetAt.IsZero() {
+				row["weekly_reset_at"] = reserve.ResetAt
 			}
 			rows = append(rows, row)
 		}

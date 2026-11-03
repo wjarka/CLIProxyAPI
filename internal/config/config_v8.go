@@ -252,7 +252,11 @@ func (cfg *Config) UnmarshalYAML(node *yaml.Node) error {
 	if errValidate := decoded.Models.Validate(); errValidate != nil {
 		return errValidate
 	}
-	*cfg = Config(decoded)
+	validated := Config(decoded)
+	if errValidate := validated.ValidateReservePolicies(); errValidate != nil {
+		return errValidate
+	}
+	*cfg = validated
 	cfg.OAuthOnlyFields = nil
 	source := expandConfigAliases(node)
 	for _, path := range v8Paths {
@@ -912,6 +916,10 @@ func ValidateV8Config(data []byte) error {
 	var cfg legacyConfig
 	if errDecode := decoder.Decode(&cfg); errDecode != nil {
 		return errDecode
+	}
+	validated := Config(cfg)
+	if errValidate := validated.ValidateReservePolicies(); errValidate != nil {
+		return errValidate
 	}
 	return cfg.Models.Validate()
 }
