@@ -562,11 +562,17 @@ func (m *Manager) availableAuthsForRouteModelWithPriorityMode(auths []*Auth, pro
 	availableByPriority := make(map[int][]*Auth)
 	cooldownCount := 0
 	unauthorizedCount := 0
+	reservedCount := 0
 	var earliest time.Time
 	for _, candidate := range auths {
+		candidate = m.reserveQuotaAuth(candidate)
 		checkModel := m.selectionModelForAuth(candidate, routeModel)
 		blocked, reason, next := isAuthBlockedForModel(candidate, checkModel, now)
 		if !blocked {
+			if reserve := m.QuotaReserveStatus(candidate, now); reserve != nil && reserve.Blocked {
+				reservedCount++
+				continue
+			}
 			priority := authPriority(candidate)
 			availableByPriority[priority] = append(availableByPriority[priority], candidate)
 			continue
@@ -583,6 +589,9 @@ func (m *Manager) availableAuthsForRouteModelWithPriorityMode(auths []*Auth, pro
 	}
 
 	if len(availableByPriority) == 0 {
+		if reservedCount > 0 {
+			return nil, &Error{Code: "quota_reserved", Message: "weekly capacity is protected by a reserve policy or its quota observation is unavailable", HTTPStatus: http.StatusTooManyRequests}
+		}
 		lastCandidateErr := latestCandidateErrorForModel(auths, func(candidate *Auth) string {
 			return m.selectionModelForAuth(candidate, routeModel)
 		})
@@ -948,6 +957,10 @@ func (m *Manager) pickViaBuiltinScheduler(ctx context.Context, strategy schedule
 	}
 	if selected == nil {
 		return nil, true, &Error{Code: "auth_not_found", Message: "selector returned no auth"}
+	}
+	if reserve := m.QuotaReserveStatus(selected, time.Now()); reserve != nil && reserve.Blocked {
+		// A plugin's built-in delegation must use the already filtered fallback.
+		return nil, false, nil
 	}
 	return selected, true, nil
 }
@@ -1643,7 +1656,7 @@ func (m *Manager) useSchedulerFastPath() bool {
 	if m == nil || m.scheduler == nil {
 		return false
 	}
-	return isBuiltInSelector(m.Selector())
+	return !m.hasReservePolicies() && isBuiltInSelector(m.Selector())
 }
 
 func shouldRetrySchedulerPick(err error) bool {
@@ -1729,6 +1742,7 @@ func (m *Manager) pickNextLegacy(ctx context.Context, provider, model string, op
 		auth, exec, _, err := m.pickNextViaHome(ctx, model, opts, tried)
 		return auth, exec, err
 	}
+	m.refreshReserveQuotas(ctx, []string{provider})
 
 	opts.EnsureMetadata()
 	opts.Metadata[cliproxyexecutor.SessionAffinityProviderMetadataKey] = provider
@@ -2047,6 +2061,7 @@ func (m *Manager) pickNextMixedLegacy(ctx context.Context, providers []string, m
 	if m.HomeEnabled() {
 		return m.pickNextViaHome(ctx, model, opts, tried)
 	}
+	m.refreshReserveQuotas(ctx, providers)
 
 	opts.EnsureMetadata()
 	opts.Metadata[cliproxyexecutor.SessionAffinityProviderMetadataKey] = "mixed"

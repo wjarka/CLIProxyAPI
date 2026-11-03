@@ -44,14 +44,76 @@ to the observation time. Five-hour resets are displayed but do not drive ranking
 Snapshots older than 24 hours, malformed data and elapsed resets are ignored.
 This changes selection, not upstream quota enforcement or cooldown handling.
 
-Quota observations come from upstream responses, including Codex WebSocket quota
-events. They are **passive**, not provider polling. Newly added accounts have no
+For accounts without reserve policies, quota observations come from upstream
+responses, including Codex WebSocket quota events. They are **passive**, not provider polling. Newly added accounts have no
 known reset until used; known-reset candidates outrank unknown candidates. An
 account that has never been used may therefore remain unobserved while known
 accounts are available. Use each new account once through the proxy before relying
-on a complete ranking. Dashboard Refresh reloads these observations; it does not
+on a complete ranking. For unrestricted accounts, Dashboard Refresh reloads these observations; it does not
 send inference or probe provider accounts. After a provider grants an unscheduled
 reset, the next observed response updates the ranking.
+
+## Protected weekly budgets
+
+Protect accounts shared with Claude Desktop or other direct clients using named
+policies. Percentages are points of the account's entire weekly allowance, per
+scheduled day. Each budget is protected in advance and released entirely at its
+local deadline; there is no gradual release or attribution of external usage.
+
+```yaml
+routing:
+  strategy: earliest-reset
+  reserve-policies:
+    work-account:
+      timezone: Europe/Warsaw
+      schedule:
+        - days: [mon, wed, thu, fri]
+          protected-budget-percent: 10
+          release-at: "17:00"
+        - days: [tue]
+          protected-budget-percent: 20
+          release-at: "17:00"
+  account-policies:
+    - account: "<exact credential ID from quota-overview>"
+      reserve-policy: work-account
+```
+
+The reserve is the sum of future release deadlines up to the account's observed
+weekly reset. For a Wednesday 05:00 reset, it falls from 60 points Wednesday
+morning to 50 Wednesday at 17:00, 40 Thursday, 30 Friday, 20 Monday and zero
+Tuesday at 17:00. Calendar dates honor the policy timezone and daylight saving.
+Changing the provider's reset timestamp automatically changes the cutoff; the
+configured Tuesday budget itself remains Tuesday-specific.
+
+The manager excludes accounts whose remaining balance is at or below the reserve
+before applying priority or session affinity. This also applies to explicit
+credential selection, mixed routes, retries and plugin delegation. Account prefixes
+and upstream cooldowns retain their existing meaning. Unassigned accounts are
+unrestricted. If all matching credentials are protected, requests return HTTP 429
+with `quota_reserved`; explicit work routes do not escape into another account pool.
+
+Protected Claude and Codex accounts use their existing authenticated read-only
+usage endpoints when their shared weekly observation is missing, invalid, expired
+or older than one minute. Requests share concurrent refreshes; failed reads are
+retried no more than once every 15 seconds and cannot disable protection. Waiting
+for quota metadata during credential acquisition is bounded to 500 ms in total;
+provider reads continue in the manager lifetime and are canceled at shutdown.
+Unknown data remains protected, so a cold or slow account may become usable on
+the next request once its background read completes. Active reserve observations
+are separate from passive plan, credit and model observations. No
+inference probe is sent. Direct clients can consume below the reserve, and data
+lag and already-running requests mean this is a routing threshold rather than an
+exact spending cap. The policy only protects the shared weekly pool; it does not
+reserve short-session or separate model-specific limits.
+
+`quota-overview` and the embedded dashboard show the policy, protected balance,
+next release and whether the account is reserved or waiting for quota data.
+Dashboard refresh may perform the same cached read-only usage check for protected
+accounts. Policy edits work through the existing v8 config API and hot reload.
+Invalid timezones, weekdays, release times, budgets, weekly totals above 100,
+duplicate account bindings and references to missing policies are rejected.
+Reserve policies require standalone execution. A Home-mode service rejects this
+combination at startup; Home dispatch also refuses it after a runtime update.
 
 ## Codex WebSockets
 

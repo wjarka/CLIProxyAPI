@@ -262,6 +262,9 @@
       return td;
     }
     function windowData(a, weekly) {
+      if (weekly && a.reserve?.remaining_percent !== undefined && date(a.reserve.observed_at) <= new Date() && Date.now() - date(a.reserve.observed_at) <= 60000) {
+        return { used: 100 - a.reserve.remaining_percent, reset: a.reserve.reset_at };
+      }
       const observed = date(a.quota?.observed_at);
       if (!observed || observed > new Date() || Date.now() - observed > 86400000)
         return null;
@@ -328,7 +331,7 @@
         );
       $("count").textContent = accounts.length;
       $("ready").textContent = accounts.filter(
-        (a) => !a.disabled && !a.unavailable,
+        (a) => !a.disabled && !a.unavailable && !a.reserve?.blocked,
       ).length;
       const next = list.find((a) => date(reset(a)) > new Date());
       $("next").textContent = next ? remaining(reset(next)) : "Unknown";
@@ -340,7 +343,7 @@
         cell(
           tr,
           a.label,
-          `${a.provider} · ${a.disabled ? "disabled" : a.unavailable ? "cooldown" : a.status}`,
+          `${a.provider} · ${a.disabled ? "disabled" : a.unavailable ? "cooldown" : a.reserve?.blocked ? a.reserve.reason === "quota_unknown" ? "waiting for quota data" : "quota reserved" : a.status}`,
         );
         for (const weekly of [false, true]) {
           const w = windowData(a, weekly);
@@ -358,7 +361,13 @@
             td.append(meter);
           }
         }
+        const deadline = a.reserve?.next_release_at;
         cell(tr, remaining(reset(a)), date(reset(a))?.toLocaleString());
+        if (a.reserve) {
+          const detail = document.createElement("small");
+          detail.textContent = `${a.reserve.protected_percent}% protected · ${a.reserve.policy}${date(deadline)?.getFullYear() > 1 ? " · next release " + date(deadline).toLocaleString() : ""}`;
+          tr.children[0].append(detail);
+        }
         cell(
           tr,
           a.provider === "codex"

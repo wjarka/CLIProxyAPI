@@ -12,6 +12,7 @@ import (
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 	"golang.org/x/sync/semaphore"
+	"golang.org/x/sync/singleflight"
 )
 
 // ProviderExecutor defines the contract required by Manager to execute provider calls.
@@ -154,6 +155,11 @@ type Manager struct {
 	resultPolicy              atomic.Pointer[resultPolicyHolder]
 	mu                        sync.RWMutex
 	selectorMu                sync.Mutex
+	reserveRefresh            singleflight.Group
+	reserveRefreshFailures    sync.Map
+	reserveQuotaObservations  sync.Map
+	reserveRefreshCtx         context.Context
+	reserveRefreshCancel      context.CancelFunc
 	configCooldownMu          sync.Mutex
 	syncSchedulerMu           sync.Mutex
 	structuralEpoch           atomic.Uint64
@@ -240,6 +246,7 @@ func NewManager(store Store, selector Selector, hook Hook) *Manager {
 		modelPoolOffsets:      make(map[string]int),
 	}
 	// atomic.Value requires non-nil initial value.
+	manager.reserveRefreshCtx, manager.reserveRefreshCancel = context.WithCancel(context.Background())
 	manager.runtimeConfig.Store(&internalconfig.Config{})
 	manager.apiKeyModelRouting.Store(&apiKeyModelRoutingSnapshot{config: &internalconfig.Config{}})
 	defaultInFlightConfig, errInFlightConfig := HomeInFlightPublisherConfigFromConfig(internalconfig.DefaultCredentialInFlightConfig())

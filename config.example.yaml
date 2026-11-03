@@ -138,6 +138,18 @@ access:
 # Routing strategy for selecting credentials when multiple match.
 routing:
   strategy: "round-robin" # round-robin (default), weighted-round-robin, fill-first, earliest-reset
+  # Optional weekly budgets protected from proxy usage until each local deadline.
+  # Account IDs must exactly match the credential ID shown in quota-overview.
+  # reserve-policies:
+  #   interactive:
+  #     timezone: Europe/Warsaw
+  #     schedule:
+  #       - days: [mon, tue, wed, thu, fri]
+  #         protected-budget-percent: 10
+  #         release-at: "17:00"
+  # account-policies:
+  #   - account: "claude-account.json"
+  #     reserve-policy: interactive
   # earliest-reset prefers the next weekly reset observed in Claude/Codex responses.
   # Enable session-affinity below to preserve active conversations. Unknown/expired
   # observations fall back to round-robin when no eligible account has a known reset.

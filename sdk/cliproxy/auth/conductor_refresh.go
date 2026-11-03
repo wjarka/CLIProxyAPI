@@ -50,11 +50,15 @@ func (m *Manager) StartAutoRefresh(parent context.Context, interval time.Duratio
 
 	m.mu.Lock()
 	cancelPrev := m.refreshCancel
+	reserveCancelPrev := m.reserveRefreshCancel
 	m.refreshCancel = nil
 	m.refreshLoop = nil
 	m.mu.Unlock()
 	if cancelPrev != nil {
 		cancelPrev()
+	}
+	if reserveCancelPrev != nil {
+		reserveCancelPrev()
 	}
 
 	ctx, cancelCtx := context.WithCancel(parent)
@@ -64,6 +68,7 @@ func (m *Manager) StartAutoRefresh(parent context.Context, interval time.Duratio
 	m.mu.Lock()
 	m.refreshCancel = cancelCtx
 	m.refreshLoop = loop
+	m.reserveRefreshCtx, m.reserveRefreshCancel = context.WithCancel(parent)
 	m.mu.Unlock()
 
 	loop.rebuild(time.Now())
@@ -75,11 +80,15 @@ func (m *Manager) StartAutoRefresh(parent context.Context, interval time.Duratio
 func (m *Manager) StopAutoRefresh() {
 	m.mu.Lock()
 	cancel := m.refreshCancel
+	reserveCancel := m.reserveRefreshCancel
 	m.refreshCancel = nil
 	m.refreshLoop = nil
 	m.mu.Unlock()
 	if cancel != nil {
 		cancel()
+	}
+	if reserveCancel != nil {
+		reserveCancel()
 	}
 	// Stop selector if it implements StoppableSelector (e.g., SessionAffinitySelector)
 	sel := m.Selector()
