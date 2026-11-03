@@ -34,6 +34,7 @@ func TestReserveUsageNormalization(t *testing.T) {
 	}{
 		{"claude", `{"seven_day":{"utilization":80,"resets_at":"2026-11-11T04:00:00Z"}}`, 20, true},
 		{"claude", `{"seven_day":{"utilization":0,"resets_at":"2026-11-11T04:00:00Z"}}`, 100, true},
+		{"claude", `{"seven_day":{"utilization":80,"resets_at":"2026-11-11T04:00:00Z"},"limits":[],"member_dashboard_available":true,"weekly_scoped_shares":[],"spend":{"used":{},"percent":100}}`, 20, true},
 		{"claude", `{"seven_day":{"utilization":101,"resets_at":"2026-11-11T04:00:00Z"}}`, 0, false},
 		{"claude", `{"seven_day":null}`, 0, false},
 		{"claude", `{"seven_day":{"utilization":80,"resets_at":"2026-11-09T04:00:00Z"}}`, 0, false},
