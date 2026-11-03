@@ -171,15 +171,23 @@ func (m *Manager) refreshOneReserveQuota(ctx context.Context, id string) error {
 func reserveUsageHeaders(provider string, body io.Reader) (http.Header, error) {
 	headers := make(http.Header)
 	if provider == "claude" {
-		var windows map[string]*struct {
+		type window struct {
 			Utilization *float64 `json:"utilization"`
 			ResetsAt    string   `json:"resets_at"`
 		}
-		if err := json.NewDecoder(body).Decode(&windows); err != nil {
+		// Usage responses also contain arrays, flags, and billing objects.
+		// Decode only quota windows so unrelated provider fields cannot reject
+		// an otherwise valid weekly observation.
+		var usage struct {
+			FiveHour *window `json:"five_hour"`
+			SevenDay *window `json:"seven_day"`
+			Fable    *window `json:"iguana_necktie"`
+		}
+		if err := json.NewDecoder(body).Decode(&usage); err != nil {
 			return nil, fmt.Errorf("invalid reserve usage response")
 		}
 		for name, prefix := range map[string]string{"five_hour": "5h", "seven_day": "7d", "iguana_necktie": "7d_oi"} {
-			w := windows[name]
+			w := map[string]*window{"five_hour": usage.FiveHour, "seven_day": usage.SevenDay, "iguana_necktie": usage.Fable}[name]
 			if w == nil || w.Utilization == nil {
 				continue
 			}
