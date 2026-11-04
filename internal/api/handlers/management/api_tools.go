@@ -30,20 +30,23 @@ const (
 var antigravityOAuthTokenURL = "https://oauth2.googleapis.com/token"
 
 type apiCallRequest struct {
-	AuthIndexSnake  *string           `json:"auth_index"`
-	AuthIndexCamel  *string           `json:"authIndex"`
-	AuthIndexPascal *string           `json:"AuthIndex"`
-	Method          string            `json:"method"`
-	URL             string            `json:"url"`
-	ProxyURL        string            `json:"proxy_url"`
-	Header          map[string]string `json:"header"`
-	Data            string            `json:"data"`
+	AuthIndexSnake      *string           `json:"auth_index"`
+	AuthIndexCamel      *string           `json:"authIndex"`
+	AuthIndexPascal     *string           `json:"AuthIndex"`
+	Method              string            `json:"method"`
+	URL                 string            `json:"url"`
+	ProxyURL            string            `json:"proxy_url"`
+	Header              map[string]string `json:"header"`
+	Data                string            `json:"data"`
+	RefreshClaudeGrants bool              `json:"refreshClaudeGrants"`
+	CacheClaudeUsage    bool              `json:"cacheClaudeUsage"`
 }
 
 type apiCallResponse struct {
 	StatusCode int                 `json:"status_code"`
 	Header     map[string][]string `json:"header"`
 	Body       string              `json:"body"`
+	UsageStale bool                `json:"usage_stale,omitempty"`
 }
 
 // APICall makes a generic HTTP request on behalf of the management API caller.
@@ -134,6 +137,36 @@ func (h *Handler) APICall(c *gin.Context) {
 
 	authIndex := firstNonEmptyString(body.AuthIndexSnake, body.AuthIndexCamel, body.AuthIndexPascal)
 	auth := h.authByIndex(authIndex)
+
+	if c.GetBool(ConfigV8ContextKey) && body.CacheClaudeUsage {
+		grants := urlStr == coreauth.ClaudeResetGrantsURL
+		if auth == nil || !strings.EqualFold(auth.Provider, "claude") || method != http.MethodGet ||
+			(urlStr != coreauth.ClaudeUsageURL && !grants) || (body.RefreshClaudeGrants && !grants) ||
+			requestProxyURL != "" || body.Data != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid cached Claude usage request"})
+			return
+		}
+		ctx, cancel := context.WithTimeout(c.Request.Context(), defaultAPICallTimeout)
+		defer cancel()
+		kind := coreauth.ClaudeUsageQuota
+		if body.RefreshClaudeGrants {
+			kind = coreauth.ClaudeUsageGrantPreflight
+		} else if grants {
+			kind = coreauth.ClaudeUsageGrantStatus
+		}
+		result := h.authManager.ReadClaudeUsage(ctx, auth.ID, kind)
+		header := make(http.Header)
+		if !result.RetryAt.IsZero() {
+			header.Set("Retry-After", result.RetryAt.UTC().Format(http.TimeFormat))
+		}
+		if result.StatusCode == http.StatusTooManyRequests {
+			result.Body = `{"error":{"type":"rate_limit_error","message":"Rate limited. Please try again later."}}`
+		}
+		c.JSON(http.StatusOK, apiCallResponse{
+			StatusCode: result.StatusCode, Header: header, Body: result.Body, UsageStale: result.Stale,
+		})
+		return
+	}
 
 	reqHeaders := body.Header
 	if reqHeaders == nil {
@@ -230,6 +263,18 @@ func (h *Handler) APICall(c *gin.Context) {
 	if errReadAll != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to read response"})
 		return
+	}
+
+	if c.GetBool(ConfigV8ContextKey) && auth != nil && strings.EqualFold(auth.Provider, "claude") &&
+		method == http.MethodPost && parsedURL.Scheme == "https" && parsedURL.Host == "api.anthropic.com" &&
+		strings.HasPrefix(parsedURL.Path, "/api/organizations/") && strings.HasSuffix(parsedURL.Path, "/reset_rate_limits") &&
+		resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		var claim struct {
+			Result string `json:"result"`
+		}
+		if json.Unmarshal(respBody, &claim) == nil && (claim.Result == "reset" || claim.Result == "already_used") {
+			h.authManager.InvalidateClaudeUsage(auth)
+		}
 	}
 
 	c.JSON(http.StatusOK, apiCallResponse{

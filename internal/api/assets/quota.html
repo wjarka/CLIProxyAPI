@@ -232,7 +232,6 @@
     const $ = (id) => document.getElementById(id);
     let token = "",
       accounts = [],
-      timer = null,
       busy = false,
       generation = 0;
     const date = (v) => {
@@ -401,7 +400,7 @@
         accounts = data.accounts || [];
         render();
         $("status").textContent =
-          `Updated ${new Date().toLocaleTimeString()} · refreshes every 30 seconds`;
+          `Updated ${new Date().toLocaleTimeString()}`;
         $("status").className = "";
         $("disconnect").hidden = false;
       } catch (e) {
@@ -419,9 +418,7 @@
       token = $("key").value.trim();
       $("key").value = "";
       generation++;
-      clearInterval(timer);
       refresh();
-      timer = setInterval(refresh, 30000);
     });
     $("refresh").onclick = refresh;
     for (const id of ["provider", "bucket"]) $(id).onchange = render;
@@ -429,7 +426,6 @@
       generation++;
       token = "";
       accounts = [];
-      clearInterval(timer);
       render();
       $("refresh").disabled = true;
       $("disconnect").hidden = true;
