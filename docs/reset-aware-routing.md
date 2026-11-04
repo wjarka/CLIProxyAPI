@@ -92,16 +92,21 @@ and upstream cooldowns retain their existing meaning. Unassigned accounts are
 unrestricted. If all matching credentials are protected, requests return HTTP 429
 with `quota_reserved`; explicit work routes do not escape into another account pool.
 
-Protected Claude and Codex accounts use their existing authenticated read-only
-usage endpoints when their shared weekly observation is missing, invalid, expired
-or older than one minute. Requests share concurrent refreshes; failed reads are
-retried no more than once every 15 seconds and cannot disable protection. Waiting
-for quota metadata during credential acquisition is bounded to 500 ms in total;
-provider reads continue in the manager lifetime and are canceled at shutdown.
-Unknown data remains protected, so a cold or slow account may become usable on
-the next request once its background read completes. Active reserve observations
-are separate from passive plan, credit and model observations. No
-inference probe is sent. Direct clients can consume below the reserve, and data
+Protected Claude and Codex accounts use their authenticated read-only usage
+endpoints when their shared weekly observation is missing, invalid, expired or
+older than one minute. Concurrent refreshes are shared. Claude shares per-account
+429 backoff with the management quota UI. Failed Codex reads are retried at most
+once every 15 seconds. Waiting for quota metadata during credential acquisition
+is bounded to 500 ms. Provider reads continue in the manager lifetime and are
+canceled at shutdown.
+
+If a refresh is unavailable, routing can keep using a valid weekly observation
+up to 30 minutes old, until the observed weekly reset. The same reserve floor
+applies to the last known remaining balance, and the management reserve status
+marks the observation as stale. Once the grace expires, or if no valid
+observation exists, the account remains protected until a valid read completes.
+Active reserve observations are separate from passive plan, credit and model
+observations. No inference probe is sent. Direct clients can consume below the reserve, and data
 lag and already-running requests mean this is a routing threshold rather than an
 exact spending cap. The policy only protects the shared weekly pool; it does not
 reserve short-session or separate model-specific limits.

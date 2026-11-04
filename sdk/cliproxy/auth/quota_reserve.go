@@ -10,7 +10,10 @@ import (
 	internalconfig "github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 )
 
-const reserveObservationMaxAge = time.Minute
+const (
+	reserveObservationMaxAge = time.Minute
+	reserveObservationGrace  = 30 * time.Minute
+)
 
 type reserveQuotaObservation struct {
 	epoch uint64
@@ -46,6 +49,7 @@ type QuotaReserveStatus struct {
 	ResetAt          time.Time `json:"reset_at,omitempty"`
 	NextReleaseAt    time.Time `json:"next_release_at,omitempty"`
 	ObservedAt       time.Time `json:"observed_at,omitempty"`
+	Stale            bool      `json:"stale,omitempty"`
 	Blocked          bool      `json:"blocked"`
 	Reason           string    `json:"reason,omitempty"`
 }
@@ -84,10 +88,14 @@ func newestReserveQuota(auth *Auth) QuotaState {
 // weeklyReserveWindow always uses the shared weekly pool, including for Fable.
 // A model-specific weekly allowance must not hide depletion of the shared pool.
 func weeklyReserveWindow(auth *Auth, now time.Time) (reset time.Time, remaining *float64, observed time.Time) {
+	return weeklyReserveWindowWithinAge(auth, now, reserveObservationMaxAge)
+}
+
+func weeklyReserveWindowWithinAge(auth *Auth, now time.Time, maxAge time.Duration) (reset time.Time, remaining *float64, observed time.Time) {
 	quota := newestReserveQuota(auth)
 	observed = quota.ObservedAt
 	reset = WeeklyQuotaReset(&Auth{Provider: auth.Provider, Quota: quota}, "", now)
-	if reset.IsZero() || observed.IsZero() || observed.After(now) || now.Sub(observed) > reserveObservationMaxAge {
+	if reset.IsZero() || observed.IsZero() || observed.After(now) || now.Sub(observed) > maxAge {
 		return reset, nil, observed
 	}
 	value := func(key string) string { return quota.Signals[http.CanonicalHeaderKey(key)] }
@@ -113,15 +121,21 @@ func weeklyReserveWindow(auth *Auth, now time.Time) (reset time.Time, remaining 
 	return reset, &balance, observed
 }
 
-// QuotaReserveStatus returns nil for unrestricted accounts. Missing or stale
-// observations block protected accounts until a read-only usage refresh succeeds.
+// QuotaReserveStatus returns nil for unrestricted accounts. During a temporary
+// refresh failure, a recent observation can keep the account eligible within
+// the same weekly window. Missing data and expired grace still block selection.
 func (m *Manager) QuotaReserveStatus(auth *Auth, now time.Time) *QuotaReserveStatus {
 	name, policy, ok := m.reservePolicyFor(auth)
 	if !ok {
 		return nil
 	}
-	reset, remaining, observed := weeklyReserveWindow(m.reserveQuotaAuth(auth), now)
-	status := &QuotaReserveStatus{Policy: name, RemainingPercent: remaining, ResetAt: reset, ObservedAt: observed}
+	// Routing can tolerate an older observation while refresh still uses the
+	// stricter one-minute window. Never carry an observation over a weekly reset.
+	reset, remaining, observed := weeklyReserveWindowWithinAge(m.reserveQuotaAuth(auth), now, reserveObservationGrace)
+	status := &QuotaReserveStatus{
+		Policy: name, RemainingPercent: remaining, ResetAt: reset, ObservedAt: observed,
+		Stale: remaining != nil && now.Sub(observed) > reserveObservationMaxAge,
+	}
 	if reset.IsZero() {
 		status.Blocked = true
 		status.Reason = "quota_unknown"

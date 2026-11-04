@@ -91,7 +91,7 @@ func TestReserveRejectsUnknownQuotaWithoutAffectingOtherAccounts(t *testing.T) {
 	reset := now.Add(20 * time.Hour)
 	for _, change := range []func(*Auth){
 		func(a *Auth) { a.Quota = QuotaState{} },
-		func(a *Auth) { a.Quota.ObservedAt = now.Add(-2 * time.Minute) },
+		func(a *Auth) { a.Quota.ObservedAt = now.Add(-31 * time.Minute) },
 		func(a *Auth) {
 			a.Quota.Signals[http.CanonicalHeaderKey("anthropic-ratelimit-unified-7d-utilization")] = "NaN"
 		},
@@ -114,6 +114,34 @@ func TestReserveRejectsUnknownQuotaWithoutAffectingOtherAccounts(t *testing.T) {
 		if err != nil || len(available) != 1 || available[0].ID != "personal" {
 			t.Fatalf("available = %v, err=%v", available, err)
 		}
+	}
+}
+
+func TestReserveStaleGraceWithinKnownWeeklyWindow(t *testing.T) {
+	now := reserveTestTime(t, "2026-11-10T09:00:00+01:00")
+	m := NewManager(nil, nil, nil)
+	defer m.StopAutoRefresh()
+	m.SetConfig(reserveTestConfig(t))
+	for _, tc := range []struct {
+		name, used, reason string
+		age, untilReset    time.Duration
+		stale, blocked     bool
+	}{
+		{"temporary outage above reserve", "0.15", "", 2 * time.Minute, 20 * time.Hour, true, false},
+		{"last known balance at reserve", "0.80", "quota_reserved", 2 * time.Minute, 20 * time.Hour, true, true},
+		{"grace expired", "0.15", "quota_unknown", 31 * time.Minute, time.Hour, false, true},
+		{"weekly reset passed", "0.15", "quota_unknown", 2 * time.Minute, -time.Second, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			auth := reserveTestAuth(now.Add(-tc.age), now.Add(tc.untilReset), tc.used)
+			status := m.QuotaReserveStatus(auth, now)
+			if status == nil || status.Blocked != tc.blocked || status.Reason != tc.reason || status.Stale != tc.stale {
+				t.Fatalf("reserve status = %+v, want blocked=%t reason=%q stale=%t", status, tc.blocked, tc.reason, tc.stale)
+			}
+			if tc.stale && status.RemainingPercent == nil {
+				t.Fatalf("reserve dropped the valid stale balance: %+v", status)
+			}
+		})
 	}
 }
 
@@ -176,6 +204,13 @@ func TestReserveManagerSelectionCannotBypassProtection(t *testing.T) {
 				t.Fatalf("initial pick=%v %v", selected, err)
 			}
 			m.mu.Lock()
+			m.auths["work.json"].Quota.ObservedAt = now.Add(-2 * time.Minute)
+			m.mu.Unlock()
+			selected, err = m.SelectAuth(context.Background(), "claude", model, opts)
+			if err != nil || selected.ID != "work.json" {
+				t.Fatalf("stale above-reserve account lost selection: %v", err)
+			}
+			m.mu.Lock()
 			m.auths["work.json"].Quota.Signals[http.CanonicalHeaderKey("anthropic-ratelimit-unified-7d-utilization")] = "0.90"
 			m.mu.Unlock()
 			selected, err = m.SelectAuth(context.Background(), "claude", model, opts)
@@ -215,9 +250,9 @@ func TestReserveRejectsHomeDispatch(t *testing.T) {
 	}
 }
 
-func TestReserveFailsClosedOnStaleDataAfterFinalRelease(t *testing.T) {
+func TestReserveFailsClosedAfterGraceEvenAfterFinalRelease(t *testing.T) {
 	now := reserveTestTime(t, "2026-11-10T18:00:00+01:00")
-	a := reserveTestAuth(now.Add(-2*time.Minute), reserveTestTime(t, "2026-11-11T05:00:00+01:00"), "0.8")
+	a := reserveTestAuth(now.Add(-31*time.Minute), reserveTestTime(t, "2026-11-11T05:00:00+01:00"), "0.8")
 	m := NewManager(nil, nil, nil)
 	m.SetConfig(reserveTestConfig(t))
 	if status := m.QuotaReserveStatus(a, now); status == nil || !status.Blocked {
