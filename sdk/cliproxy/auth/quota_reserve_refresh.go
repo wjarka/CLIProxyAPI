@@ -78,8 +78,8 @@ func (m *Manager) refreshReserveQuotas(ctx context.Context, providers []string) 
 		case <-wait.C:
 			return
 		case <-result:
-			// Failed or incomplete reads leave the account protected. Never log
-			// response bodies, URLs with credentials, or provider token errors.
+			// Failed or incomplete reads leave the prior observation intact.
+			// Never log response bodies, URLs with credentials, or token errors.
 		}
 	}
 }

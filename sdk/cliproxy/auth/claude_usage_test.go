@@ -48,8 +48,8 @@ func TestClaudeUsageSharedWithReserveAndStaleOnRateLimit(t *testing.T) {
 		t.Fatalf("429 should keep prior quota with meaningful backoff: %+v", stale)
 	}
 	m.RefreshReserveQuotas(ctx)
-	if reserve := m.QuotaReserveStatus(work, time.Now()); reserve == nil || !reserve.Blocked || reserve.Reason != "quota_unknown" {
-		t.Fatalf("stale usage must not allow protected routing: %+v", reserve)
+	if reserve := m.QuotaReserveStatus(work, time.Now()); reserve == nil || reserve.Blocked || !reserve.Stale {
+		t.Fatalf("last known above-reserve balance should keep routing through backoff: %+v", reserve)
 	}
 	if grant := m.ReadClaudeUsage(ctx, work.ID, ClaudeUsageGrantPreflight); grant.StatusCode != http.StatusTooManyRequests || calls.Load() != 2 {
 		t.Fatalf("grant lookup bypassed account backoff: %+v, calls=%d", grant, calls.Load())
@@ -76,7 +76,11 @@ func ageClaudeUsage(t *testing.T, m *Manager, id string) {
 		t.Fatal("expected a cached usage response")
 	}
 	entry.(*claudeUsageAccount).usage.freshUntil = time.Time{}
-	m.reserveQuotaObservations.Delete(id)
+	if value, ok := m.reserveQuotaObservations.Load(id); ok {
+		observation := value.(reserveQuotaObservation)
+		observation.quota.ObservedAt = time.Now().Add(-2 * time.Minute)
+		m.reserveQuotaObservations.Store(id, observation)
+	}
 }
 
 func TestClaudeGrantPreflightBypassesFreshSnapshotButHonorsBackoff(t *testing.T) {
