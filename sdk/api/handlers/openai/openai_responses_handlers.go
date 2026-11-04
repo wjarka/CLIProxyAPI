@@ -865,13 +865,22 @@ func (h *OpenAIResponsesAPIHandler) handleStreamingResponse(c *gin.Context, rawJ
 	}
 }
 
-// isCodexResponsesClientRequest limits the alternate terminal event to official Codex clients.
+// isCodexResponsesClientRequest includes app-server integrations, which replace
+// the official client's HTTP identity with their initialize clientInfo.name.
 func isCodexResponsesClientRequest(c *gin.Context) bool {
 	if c == nil || c.Request == nil {
 		return false
 	}
 	if multiagentv2.IsCodexClientUserAgent(c.GetHeader("User-Agent")) {
 		return true
+	}
+	if metadata := c.GetHeader("X-Codex-Turn-Metadata"); gjson.Valid(metadata) {
+		sessionID := gjson.Get(metadata, "session_id")
+		threadID := gjson.Get(metadata, "thread_id")
+		if sessionID.Type == gjson.String && strings.TrimSpace(sessionID.String()) != "" &&
+			threadID.Type == gjson.String && strings.TrimSpace(threadID.String()) != "" {
+			return true
+		}
 	}
 
 	switch originator := strings.ToLower(strings.TrimSpace(c.GetHeader("Originator"))); originator {
