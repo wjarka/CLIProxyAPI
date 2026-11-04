@@ -110,7 +110,8 @@ func (m *Manager) refreshOneReserveQuota(ctx context.Context, id string) error {
 	endpoint := ""
 	switch strings.ToLower(auth.Provider) {
 	case "claude":
-		endpoint = "https://api.anthropic.com/api/oauth/usage"
+		m.ReadClaudeUsage(ctx, id, ClaudeUsageQuota)
+		return nil
 	case "codex":
 		endpoint = "https://chatgpt.com/backend-api/wham/usage"
 	default:
@@ -122,10 +123,7 @@ func (m *Manager) refreshOneReserveQuota(ctx context.Context, id string) error {
 		return err
 	}
 	req.Header.Set("Accept", "application/json")
-	if auth.Provider == "claude" {
-		req.Header.Set("anthropic-beta", "oauth-2025-04-20")
-		req.Header.Set("User-Agent", "claude-cli/2.1.280 (external, cli)")
-	} else if account, ok := auth.Metadata["account_id"].(string); ok && account != "" {
+	if account, ok := auth.Metadata["account_id"].(string); ok && account != "" {
 		req.Header.Set("Chatgpt-Account-Id", account)
 	}
 	resp, err := executor.HttpRequest(ctx, auth, req)
@@ -143,15 +141,9 @@ func (m *Manager) refreshOneReserveQuota(ctx context.Context, id string) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("reserve usage read returned status %d", resp.StatusCode)
 	}
-	headers, err := reserveUsageHeaders(auth.Provider, io.LimitReader(resp.Body, 1<<20))
+	next, err := parseReserveUsage(auth.Provider, io.LimitReader(resp.Body, 1<<20), time.Now())
 	if err != nil {
 		return err
-	}
-	observed := time.Now()
-	next := QuotaState{}
-	next.ObserveResponseHeadersForProvider(auth.Provider, headers, observed)
-	if _, remaining, _ := weeklyReserveWindow(&Auth{Provider: auth.Provider, Quota: next}, observed); remaining == nil {
-		return fmt.Errorf("reserve usage read has no valid weekly observation")
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -166,6 +158,19 @@ func (m *Manager) refreshOneReserveQuota(ctx context.Context, id string) error {
 	m.reserveQuotaObservations.Store(id, reserveQuotaObservation{epoch: auth.RegistrationEpoch, quota: next})
 	m.reserveRefreshFailures.Delete(id)
 	return nil
+}
+
+func parseReserveUsage(provider string, body io.Reader, observed time.Time) (QuotaState, error) {
+	headers, err := reserveUsageHeaders(provider, body)
+	if err != nil {
+		return QuotaState{}, err
+	}
+	var quota QuotaState
+	quota.ObserveResponseHeadersForProvider(provider, headers, observed)
+	if _, remaining, _ := weeklyReserveWindow(&Auth{Provider: provider, Quota: quota}, observed); remaining == nil {
+		return QuotaState{}, fmt.Errorf("reserve usage read has no valid weekly observation")
+	}
+	return quota, nil
 }
 
 func reserveUsageHeaders(provider string, body io.Reader) (http.Header, error) {

@@ -118,7 +118,7 @@ func TestReserveColdStartAndExternalUsageRefresh(t *testing.T) {
 			m.mu.Lock()
 			m.auths["work.json"].Quota.ObservedAt = time.Now().Add(-2 * time.Minute)
 			m.mu.Unlock()
-			m.reserveQuotaObservations.Delete("work.json")
+			ageClaudeUsage(t, m, "work.json")
 			// External consumption is now visible; no inference request is needed.
 			if _, err = m.SelectAuth(context.Background(), "claude", model, cliproxyexecutor.Options{}); err == nil {
 				t.Fatal("external usage did not protect account")

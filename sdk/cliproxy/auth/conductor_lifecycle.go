@@ -299,6 +299,18 @@ func (m *Manager) updateInternal(ctx context.Context, base, auth *Auth, mode upd
 		auth.Generation = existing.Generation + 1
 	}
 	authClone := auth.Clone()
+	// An uploaded replacement may change the account without changing the file ID.
+	if mode == updateModeReplace && CredentialsChanged(existing, auth) &&
+		(strings.EqualFold(existing.Provider, "claude") || strings.EqualFold(auth.Provider, "claude")) {
+		m.claudeUsage.Delete(auth.ID)
+		m.reserveQuotaObservations.Delete(auth.ID)
+		authClone.Quota.ClearObservationSignals()
+		for _, model := range authClone.ModelStates {
+			if model != nil {
+				model.Quota.ClearObservationSignals()
+			}
+		}
+	}
 	m.auths[auth.ID] = authClone
 	m.notifyAuthChangeLocked(auth.ID)
 	// Snapshot before unlocking: MarkResult mutates the published auth in place.
@@ -345,6 +357,7 @@ func (m *Manager) Remove(ctx context.Context, id string) {
 	}
 	provider := strings.TrimSpace(existing.Provider)
 	delete(m.auths, id)
+	m.claudeUsage.Delete(id)
 	m.notifyAuthChangeLocked(id)
 	if m.modelPoolOffsets != nil {
 		delete(m.modelPoolOffsets, id)
@@ -423,6 +436,7 @@ func (m *Manager) Load(ctx context.Context) error {
 	}
 	m.mu.Lock()
 	previousAuths := m.auths
+	m.claudeUsage.Clear()
 	m.auths = make(map[string]*Auth, len(items))
 	if m.authEpochs == nil {
 		m.authEpochs = make(map[string]uint64, len(items))

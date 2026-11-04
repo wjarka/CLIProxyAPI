@@ -157,6 +157,7 @@ type Manager struct {
 	selectorMu                sync.Mutex
 	reserveRefresh            singleflight.Group
 	reserveRefreshFailures    sync.Map
+	claudeUsage               sync.Map
 	reserveQuotaObservations  sync.Map
 	reserveRefreshCtx         context.Context
 	reserveRefreshCancel      context.CancelFunc
