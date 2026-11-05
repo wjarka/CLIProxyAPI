@@ -643,7 +643,15 @@ func (m *Manager) refreshAuthForRequestAtEpoch(ctx context.Context, id, failedAc
 	}
 
 	base := auth.Clone()
-	updated, err := exec.Refresh(ctx, base.Clone())
+	var updated *Auth
+	var err error
+	if !forceRefresh && auth.ExpiredClaudeRefreshToken != "" && auth.ExpiredClaudeRefreshToken == authRefreshToken(auth) {
+		// A prior renewal already proved this refresh token unusable. Keep the
+		// working access token until expiry, then transition without another call.
+		err = &Error{Message: "refresh token expired (sign-in required)", HTTPStatus: http.StatusBadRequest}
+	} else {
+		updated, err = exec.Refresh(ctx, base.Clone())
+	}
 	if err != nil && errors.Is(err, context.Canceled) {
 		log.Debugf("refresh canceled for %s, %s", auth.Provider, auth.ID)
 		return nil, err
@@ -653,12 +661,17 @@ func (m *Manager) refreshAuthForRequestAtEpoch(ctx context.Context, id, failedAc
 	if err != nil {
 		unauthorized := isUnauthorizedError(err)
 		invalidGrant := isInvalidGrantError(err)
+		expiredRefresh := isClaudeExpiredRefreshTokenError(auth, err)
 		shouldReschedule := false
 		isDisabled := false
 		shouldUnschedule := false
 		m.mu.Lock()
 		if current := m.auths[id]; current != nil {
 			if base != nil && current.RegistrationEpoch != base.RegistrationEpoch {
+				m.mu.Unlock()
+				return nil, err
+			}
+			if expiredRefresh && CredentialsChanged(base, current) {
 				m.mu.Unlock()
 				return nil, err
 			}
@@ -689,6 +702,9 @@ func (m *Manager) refreshAuthForRequestAtEpoch(ctx context.Context, id, failedAc
 			current.Generation++
 			current.UpdatedAt = now
 			current.LastError = refreshErrorFromError(err)
+			if expiredRefresh {
+				current.ExpiredClaudeRefreshToken = authRefreshToken(current)
+			}
 
 			isDisabled = current.Disabled || current.Status == StatusDisabled
 			hasValidAccessToken := current.HasValidAccessToken(now)
@@ -710,7 +726,7 @@ func (m *Manager) refreshAuthForRequestAtEpoch(ctx context.Context, id, failedAc
 					current.StatusMessage = "disabled"
 				}
 				shouldReschedule = true
-			} else if accessTokenRejected && invalidGrant {
+			} else if (accessTokenRejected && invalidGrant) || (expiredRefresh && (accessTokenRejected || !hasValidAccessToken)) {
 				// Neither token can recover without a new login. Stop selecting the
 				// credential until its tokens change instead of retrying it after
 				// every cooldown and returning the same 401 to clients.
@@ -722,6 +738,13 @@ func (m *Manager) refreshAuthForRequestAtEpoch(ctx context.Context, id, failedAc
 				current.LastError = &Error{Code: "unauthorized", Message: err.Error(), HTTPStatus: http.StatusUnauthorized}
 				current.StatusMessage = "unauthorized (refresh token invalid)"
 				shouldUnschedule = true
+			} else if expiredRefresh {
+				// Do not abandon an otherwise usable account because renewal failed.
+				// Wake only at access expiry to mark it as requiring sign-in.
+				current.NextRefreshAfter, _ = current.AccessTokenExpirationTime()
+				current.RefreshFailures = 0
+				current.StatusMessage = "refresh token expired (sign-in required before access token expires)"
+				shouldReschedule = true
 			} else if !hasValidAccessToken {
 				current.Unavailable = true
 				current.Status = StatusError
@@ -784,6 +807,7 @@ func (m *Manager) refreshAuthForRequestAtEpoch(ctx context.Context, id, failedAc
 	updated.LastRefreshedAt = now
 	updated.NextRefreshAfter = time.Time{}
 	updated.LastError = nil
+	updated.ExpiredClaudeRefreshToken = ""
 	updated.StatusMessage = ""
 	updated.Unavailable = false
 	updated.RefreshFailures = 0

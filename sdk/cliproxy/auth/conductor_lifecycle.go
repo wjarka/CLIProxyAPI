@@ -238,6 +238,11 @@ func (m *Manager) updateInternal(ctx context.Context, base, auth *Auth, mode upd
 	auth.Success = existing.Success
 	auth.Failed = existing.Failed
 	auth.recentRequests = existing.recentRequests
+	if mode != updateModeRefresh && existing.ExpiredClaudeRefreshToken != "" && authRefreshToken(auth) == existing.ExpiredClaudeRefreshToken {
+		auth.ExpiredClaudeRefreshToken = existing.ExpiredClaudeRefreshToken
+	} else {
+		auth.ExpiredClaudeRefreshToken = ""
+	}
 	if auth.Generation <= existing.Generation {
 		auth.Generation = existing.Generation + 1
 	} else {
@@ -250,7 +255,10 @@ func (m *Manager) updateInternal(ctx context.Context, base, auth *Auth, mode upd
 		}
 		credChanged := CredentialsChanged(existing, auth)
 		if credChanged {
-			if hasUnauthorizedAuthFailure(existing) || (auth.LastError != nil && isUnauthorizedError(auth.LastError)) {
+			if existing.ExpiredClaudeRefreshToken != "" && auth.ExpiredClaudeRefreshToken == "" {
+				auth.NextRefreshAfter = time.Time{}
+			}
+			if hasUnauthorizedAuthFailure(existing) || (auth.LastError != nil && (isUnauthorizedError(auth.LastError) || isClaudeExpiredRefreshTokenError(auth, auth.LastError))) {
 				auth.Unavailable = false
 				auth.LastError = nil
 				auth.StatusMessage = ""
