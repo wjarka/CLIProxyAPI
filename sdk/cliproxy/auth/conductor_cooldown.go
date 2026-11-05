@@ -1731,6 +1731,20 @@ func hasUnauthorizedAuthFailure(auth *Auth) bool {
 	return false
 }
 
+// Anthropic explicitly requires a new login for an expired refresh token.
+// Other invalid_grant errors can be transient, including token rotation races.
+func isClaudeExpiredRefreshTokenError(auth *Auth, err error) bool {
+	if auth == nil || !strings.EqualFold(strings.TrimSpace(auth.Provider), "claude") || err == nil {
+		return false
+	}
+	status := statusCodeFromError(err)
+	if status != 0 && status != http.StatusBadRequest && status != http.StatusUnauthorized {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "refresh token expired") || strings.Contains(message, "refresh_token_expired")
+}
+
 // HasUnauthorizedAuthFailure reports whether the auth has a terminal unauthorized error
 // with no pending refresh scheduled.
 func HasUnauthorizedAuthFailure(auth *Auth) bool {

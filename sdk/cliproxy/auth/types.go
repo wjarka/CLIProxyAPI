@@ -92,6 +92,9 @@ type Auth struct {
 	NextRefreshAfter time.Time `json:"next_refresh_after"`
 	// RefreshFailures tracks consecutive refresh failures for exponential backoff (in-memory only).
 	RefreshFailures int `json:"-"`
+	// ExpiredClaudeRefreshToken binds a terminal renewal failure to its credential.
+	// Successful inference must not clear it. It is never serialized.
+	ExpiredClaudeRefreshToken string `json:"-"`
 	// NextRetryAfter is the earliest time a retry should retrigger.
 	NextRetryAfter time.Time `json:"next_retry_after"`
 	// ModelStates tracks per-model runtime availability data.
