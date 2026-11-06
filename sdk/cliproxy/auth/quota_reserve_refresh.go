@@ -170,8 +170,11 @@ func parseReserveUsage(provider string, body io.Reader, observed time.Time) (Quo
 	}
 	var quota QuotaState
 	quota.ObserveResponseHeadersForProvider(provider, headers, observed)
-	if _, remaining, _ := weeklyReserveWindow(&Auth{Provider: provider, Quota: quota}, observed); remaining == nil {
-		return QuotaState{}, fmt.Errorf("reserve usage read has no valid weekly observation")
+	candidate := &Auth{Provider: provider, Quota: quota}
+	_, remaining, _ := weeklyReserveWindow(candidate, observed)
+	_, used, _ := fiveHourUsageWindow(candidate, observed)
+	if remaining == nil && used == nil {
+		return QuotaState{}, fmt.Errorf("quota policy usage read has no valid weekly or five-hour observation")
 	}
 	return quota, nil
 }
