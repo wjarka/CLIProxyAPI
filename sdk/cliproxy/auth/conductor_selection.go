@@ -563,14 +563,19 @@ func (m *Manager) availableAuthsForRouteModelWithPriorityMode(auths []*Auth, pro
 	cooldownCount := 0
 	unauthorizedCount := 0
 	reservedCount := 0
+	usageGuardCount := 0
 	var earliest time.Time
 	for _, candidate := range auths {
 		candidate = m.reserveQuotaAuth(candidate)
 		checkModel := m.selectionModelForAuth(candidate, routeModel)
 		blocked, reason, next := isAuthBlockedForModel(candidate, checkModel, now)
 		if !blocked {
-			if reserve := m.QuotaReserveStatus(candidate, now); reserve != nil && reserve.Blocked {
-				reservedCount++
+			if reason := m.quotaPolicyBlockReason(candidate, now); reason != "" {
+				if reason == "quota_usage_guard" {
+					usageGuardCount++
+				} else {
+					reservedCount++
+				}
 				continue
 			}
 			priority := authPriority(candidate)
@@ -589,6 +594,9 @@ func (m *Manager) availableAuthsForRouteModelWithPriorityMode(auths []*Auth, pro
 	}
 
 	if len(availableByPriority) == 0 {
+		if usageGuardCount > 0 && reservedCount == 0 {
+			return nil, &Error{Code: "quota_usage_guard", Message: "five-hour capacity is protected during scheduled working hours or its quota observation is unavailable", HTTPStatus: http.StatusTooManyRequests}
+		}
 		if reservedCount > 0 {
 			return nil, &Error{Code: "quota_reserved", Message: "weekly capacity is protected by a reserve policy or its quota observation is unavailable", HTTPStatus: http.StatusTooManyRequests}
 		}
@@ -958,7 +966,7 @@ func (m *Manager) pickViaBuiltinScheduler(ctx context.Context, strategy schedule
 	if selected == nil {
 		return nil, true, &Error{Code: "auth_not_found", Message: "selector returned no auth"}
 	}
-	if reserve := m.QuotaReserveStatus(selected, time.Now()); reserve != nil && reserve.Blocked {
+	if m.quotaPolicyBlockReason(selected, time.Now()) != "" {
 		// A plugin's built-in delegation must use the already filtered fallback.
 		return nil, false, nil
 	}

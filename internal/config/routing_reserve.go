@@ -24,7 +24,8 @@ type ReserveSchedule struct {
 // AccountReservePolicy identifies a credential by its exact stable runtime ID.
 type AccountReservePolicy struct {
 	Account       string `yaml:"account" json:"account"`
-	ReservePolicy string `yaml:"reserve-policy" json:"reserve-policy"`
+	ReservePolicy string `yaml:"reserve-policy,omitempty" json:"reserve-policy,omitempty"`
+	UsagePolicy   string `yaml:"usage-policy,omitempty" json:"usage-policy,omitempty"`
 }
 
 var reserveWeekdays = map[string]time.Weekday{
@@ -46,6 +47,9 @@ func (cfg *Config) ValidateReservePolicies() error {
 
 // ValidateReserves rejects configurations that would silently lose protection.
 func (r RoutingConfig) ValidateReserves() error {
+	if err := r.validateUsagePolicies(); err != nil {
+		return err
+	}
 	for name, policy := range r.ReservePolicies {
 		if name == "" || name != strings.TrimSpace(name) {
 			return fmt.Errorf("routing.reserve-policies: invalid policy name %q", name)
@@ -90,8 +94,14 @@ func (r RoutingConfig) ValidateReserves() error {
 			return fmt.Errorf("routing.account-policies requires unique non-empty account IDs")
 		}
 		seen[binding.Account] = true
-		if _, ok := r.ReservePolicies[binding.ReservePolicy]; !ok {
+		if binding.ReservePolicy == "" && binding.UsagePolicy == "" {
+			return fmt.Errorf("account %q requires a reserve-policy or usage-policy", binding.Account)
+		}
+		if _, ok := r.ReservePolicies[binding.ReservePolicy]; binding.ReservePolicy != "" && !ok {
 			return fmt.Errorf("account %q refers to unknown reserve policy %q", binding.Account, binding.ReservePolicy)
+		}
+		if _, ok := r.UsagePolicies[binding.UsagePolicy]; binding.UsagePolicy != "" && !ok {
+			return fmt.Errorf("account %q refers to unknown usage policy %q", binding.Account, binding.UsagePolicy)
 		}
 	}
 	return nil
