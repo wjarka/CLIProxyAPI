@@ -120,6 +120,61 @@ duplicate account bindings and references to missing policies are rejected.
 Reserve policies require standalone execution. A Home-mode service rejects this
 combination at startup; Home dispatch also refuses it after a runtime update.
 
+## Working-hours five-hour guard
+
+A separate named usage policy protects part of the five-hour quota during
+configured local working hours, using the weekly reserve's protected-budget convention:
+
+```yaml
+routing:
+  usage-policies:
+    work-hours:
+      timezone: Europe/Warsaw
+      protected-budget-percent: 30
+      schedule:
+        - days: [mon, tue, wed, thu, fri]
+          start: "09:00"
+          end: "17:00"
+  account-policies:
+    - account: work-claude.json
+      reserve-policy: work-account # Existing weekly reserve, defined above.
+      usage-policy: work-hours
+```
+
+Account bindings may specify either policy or both. The guard protects 30% of the
+five-hour quota, blocking at 70% consumed, independently of weekly balance. At 09:00
+it becomes active; at 17:00 it stops applying. Weekends are unrestricted by this
+guard. Timezone rules include daylight saving time. Schedule entries are same-day
+intervals with `HH:MM` start before end; use multiple entries for split workdays.
+Protected percentages range from 0 through 100, inclusive; 0 reserves nothing,
+while 100 blocks all selections during the schedule. Missing or invalid quota
+data still fails closed. Unknown policy references and invalid schedules fail validation.
+The initial `five-hour-used-percent` key is accepted on input for upgrades and
+converted to protection (`70` becomes `30`); specifying both keys is rejected.
+New configuration and status responses use protected percentages.
+
+During protected hours, stale (older than one minute), missing, invalid or expired
+five-hour observations block selection until a read-only refresh succeeds. Fresh
+weekly data cannot substitute for five-hour data. Claude uses the shared `5h`
+window; Codex identifies the window by its 300-minute duration. Outside protected
+hours the guard requires no quota observation; any weekly reserve and upstream
+cooldown still apply. Both guards share cached, deduplicated metadata reads and
+the existing bounded credential-acquisition wait. Direct provider use is unaffected.
+
+Pinned credentials, session affinity, retries, mixed-provider routes and scheduler
+plugins cannot bypass the guard. When it excludes all matching credentials,
+requests receive HTTP 429 with `quota_usage_guard` (weekly reserve failures retain
+`quota_reserved`). The quota overview exposes a separate `usage_policy` object:
+schedule, timezone, `protected_percent`, `remaining_percent`, active interval end,
+observed consumption/reset,
+blocked flag and reason (`five_hour_limit` or `quota_unknown`). Configuration edits
+use the validated v8 management API and hot reload, alongside existing reserves.
+Home dispatch is unsupported and rejected for either quota policy.
+
+This is a routing threshold, not a hard spending cap: cached provider readings,
+concurrent requests and already-running streams can exceed the threshold before
+a later selection observes the new consumption. Existing streams are not aborted.
+
 ## Codex WebSockets
 
 Upstream already implements the WebSocket transport. Both ends must enable it:

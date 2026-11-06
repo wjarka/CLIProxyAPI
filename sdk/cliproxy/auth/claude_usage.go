@@ -163,11 +163,22 @@ func (m *Manager) ReadClaudeUsage(ctx context.Context, id string, kind ClaudeUsa
 	result.ObservedAt = observed
 	result.freshUntil = observed.Add(reserveObservationMaxAge)
 	if !quota.ObservedAt.IsZero() {
-		reset := WeeklyQuotaReset(&Auth{Provider: "claude", Quota: quota}, "", observed)
-		if reset.Before(result.freshUntil) {
-			result.freshUntil = reset
+		candidate := &Auth{Provider: "claude", Quota: quota}
+		weeklyReset := WeeklyQuotaReset(candidate, "", observed)
+		shortReset, shortUsed, _ := fiveHourUsageWindow(candidate, observed)
+		if shortUsed == nil {
+			shortReset = time.Time{}
 		}
-		if !newestReserveQuota(current).ObservedAt.After(now) {
+		for _, reset := range []time.Time{weeklyReset, shortReset} {
+			if !reset.IsZero() && reset.Before(result.freshUntil) {
+				result.freshUntil = reset
+			}
+		}
+		// Preserve independently dated prior observations when a partial response
+		// omits a window required by this account. Never stamp old weekly data
+		// with a fresh five-hour timestamp.
+		candidate.ID = id
+		if m.quotaPolicyObservationFresh(candidate, observed) && !newestReserveQuota(current).ObservedAt.After(now) {
 			m.reserveQuotaObservations.Store(id, reserveQuotaObservation{epoch: state.epoch, quota: quota})
 		}
 	}

@@ -39,7 +39,7 @@ func (m *Manager) refreshReserveQuotas(ctx context.Context, providers []string) 
 		if auth.Disabled {
 			continue
 		}
-		if _, _, ok := m.reservePolicyFor(auth); !ok {
+		if !m.hasQuotaPolicyFor(auth) {
 			continue
 		}
 		if len(providers) > 0 {
@@ -54,8 +54,7 @@ func (m *Manager) refreshReserveQuotas(ctx context.Context, providers []string) 
 				continue
 			}
 		}
-		_, remaining, _ := weeklyReserveWindow(m.reserveQuotaAuth(auth), time.Now())
-		if remaining != nil {
+		if m.quotaPolicyObservationFresh(m.reserveQuotaAuth(auth), time.Now()) {
 			continue
 		}
 		result := m.reserveRefresh.DoChan(auth.ID, func() (any, error) {
@@ -101,10 +100,10 @@ func (m *Manager) refreshOneReserveQuota(ctx context.Context, id string) error {
 	if !ok {
 		return nil
 	}
-	if _, _, protected := m.reservePolicyFor(auth); !protected {
+	if !m.hasQuotaPolicyFor(auth) {
 		return nil
 	}
-	if _, remaining, _ := weeklyReserveWindow(m.reserveQuotaAuth(auth), now); remaining != nil {
+	if m.quotaPolicyObservationFresh(m.reserveQuotaAuth(auth), now) {
 		return nil
 	}
 	endpoint := ""
@@ -145,6 +144,10 @@ func (m *Manager) refreshOneReserveQuota(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	if !m.quotaPolicyObservationFresh(&Auth{ID: auth.ID, Provider: auth.Provider, Quota: next}, next.ObservedAt) {
+		return fmt.Errorf("quota policy usage read has no valid observation for every required window")
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	current = m.auths[id]
@@ -167,8 +170,11 @@ func parseReserveUsage(provider string, body io.Reader, observed time.Time) (Quo
 	}
 	var quota QuotaState
 	quota.ObserveResponseHeadersForProvider(provider, headers, observed)
-	if _, remaining, _ := weeklyReserveWindow(&Auth{Provider: provider, Quota: quota}, observed); remaining == nil {
-		return QuotaState{}, fmt.Errorf("reserve usage read has no valid weekly observation")
+	candidate := &Auth{Provider: provider, Quota: quota}
+	_, remaining, _ := weeklyReserveWindow(candidate, observed)
+	_, used, _ := fiveHourUsageWindow(candidate, observed)
+	if remaining == nil && used == nil {
+		return QuotaState{}, fmt.Errorf("quota policy usage read has no valid weekly or five-hour observation")
 	}
 	return quota, nil
 }
