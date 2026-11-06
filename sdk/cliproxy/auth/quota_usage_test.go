@@ -22,7 +22,7 @@ const usageTestYAML = `routing:
   usage-policies:
     work-hours:
       timezone: Europe/Warsaw
-      five-hour-used-percent: 70
+      protected-budget-percent: 30
       schedule:
         - days: [mon, tue, wed, thu, fri]
           start: "09:00"
@@ -316,8 +316,8 @@ func TestUsageGuardConfiguredThresholdEquality(t *testing.T) {
 	now := reserveTestTime(t, "2026-11-06T12:00:00+01:00")
 	cfg := usageTestConfig(t)
 	p := cfg.Routing.UsagePolicies["work-hours"]
-	limit := 58.0
-	p.FiveHourUsedPercent = &limit
+	protected := 42.0
+	p.ProtectedBudgetPercent = &protected
 	cfg.Routing.UsagePolicies["work-hours"] = p
 	m := NewManager(nil, nil, nil)
 	m.SetConfig(cfg)
@@ -328,6 +328,30 @@ func TestUsageGuardConfiguredThresholdEquality(t *testing.T) {
 		status := m.QuotaUsageStatus(usageTestAuth(now, tc.used), now)
 		if status.Blocked != tc.blocked {
 			t.Fatalf("used=%s blocked=%v want%v", tc.used, status.Blocked, tc.blocked)
+		}
+	}
+}
+
+func TestUsageGuardProtectedBudgetBoundaries(t *testing.T) {
+	now := reserveTestTime(t, "2026-11-06T12:00:00+01:00")
+	for _, tc := range []struct {
+		protected string
+		used      string
+		blocked   bool
+	}{
+		{"30", "0.69999", false}, {"30", "0.70", true}, {"30", "0.71", true},
+		{"42", "0.58", true}, {"42", "0.57999", false},
+		{"0", "1", false}, {"100", "0", true},
+	} {
+		cfg, err := internalconfig.ParseConfigBytes([]byte(strings.ReplaceAll(usageTestYAML, "protected-budget-percent: 30", "protected-budget-percent: "+tc.protected)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := NewManager(nil, nil, nil)
+		m.SetConfig(cfg)
+		status := m.QuotaUsageStatus(usageTestAuth(now, tc.used), now)
+		if status == nil || status.Blocked != tc.blocked {
+			t.Fatalf("protected=%s used=%s status=%+v", tc.protected, tc.used, status)
 		}
 	}
 }

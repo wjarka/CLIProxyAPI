@@ -12,17 +12,18 @@ import (
 
 // QuotaUsageStatus describes the independent five-hour working-hours guard.
 type QuotaUsageStatus struct {
-	Policy       string                         `json:"policy"`
-	Timezone     string                         `json:"timezone"`
-	Schedule     []internalconfig.UsageSchedule `json:"schedule"`
-	LimitPercent float64                        `json:"limit_percent"`
-	Active       bool                           `json:"active"`
-	ActiveUntil  time.Time                      `json:"active_until,omitempty"`
-	UsedPercent  *float64                       `json:"used_percent,omitempty"`
-	ResetAt      time.Time                      `json:"reset_at,omitempty"`
-	ObservedAt   time.Time                      `json:"observed_at,omitempty"`
-	Blocked      bool                           `json:"blocked"`
-	Reason       string                         `json:"reason,omitempty"`
+	Policy           string                         `json:"policy"`
+	Timezone         string                         `json:"timezone"`
+	Schedule         []internalconfig.UsageSchedule `json:"schedule"`
+	ProtectedPercent float64                        `json:"protected_percent"`
+	Active           bool                           `json:"active"`
+	ActiveUntil      time.Time                      `json:"active_until,omitempty"`
+	UsedPercent      *float64                       `json:"used_percent,omitempty"`
+	RemainingPercent *float64                       `json:"remaining_percent,omitempty"`
+	ResetAt          time.Time                      `json:"reset_at,omitempty"`
+	ObservedAt       time.Time                      `json:"observed_at,omitempty"`
+	Blocked          bool                           `json:"blocked"`
+	Reason           string                         `json:"reason,omitempty"`
 }
 
 func (m *Manager) usagePolicyFor(auth *Auth) (string, internalconfig.UsagePolicy, bool) {
@@ -93,22 +94,26 @@ func (m *Manager) QuotaUsageStatus(auth *Auth, now time.Time) *QuotaUsageStatus 
 		return nil
 	}
 	status := &QuotaUsageStatus{Policy: name, Timezone: p.Timezone, Schedule: p.Schedule, ActiveUntil: p.ActiveUntil(now)}
-	if p.FiveHourUsedPercent != nil {
-		status.LimitPercent = *p.FiveHourUsedPercent
+	if p.ProtectedBudgetPercent != nil {
+		status.ProtectedPercent = *p.ProtectedBudgetPercent
 	}
 	status.Active = !status.ActiveUntil.IsZero()
 	status.ResetAt, status.UsedPercent, status.ObservedAt = fiveHourUsageWindow(m.reserveQuotaAuth(auth), now)
+	if status.UsedPercent != nil {
+		remaining := 100 - *status.UsedPercent
+		status.RemainingPercent = &remaining
+	}
 	if !status.Active {
 		return status
 	}
-	if status.UsedPercent == nil || p.FiveHourUsedPercent == nil {
+	if status.RemainingPercent == nil || p.ProtectedBudgetPercent == nil {
 		status.Blocked = true
 		status.Reason = "quota_unknown"
 		return status
 	}
 	// Provider utilization is scaled from a fraction; tolerate float rounding
 	// so an observed value at the configured threshold always blocks.
-	if *status.UsedPercent >= status.LimitPercent-1e-9 {
+	if status.ProtectedPercent > 0 && *status.RemainingPercent <= status.ProtectedPercent+1e-9 {
 		status.Blocked = true
 		status.Reason = "five_hour_limit"
 	}

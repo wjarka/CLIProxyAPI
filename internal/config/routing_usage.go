@@ -1,17 +1,52 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // UsagePolicy bounds five-hour consumption during scheduled local working hours.
 type UsagePolicy struct {
-	Timezone            string          `yaml:"timezone" json:"timezone"`
-	FiveHourUsedPercent *float64        `yaml:"five-hour-used-percent" json:"five-hour-used-percent"`
-	Schedule            []UsageSchedule `yaml:"schedule" json:"schedule"`
+	Timezone               string          `yaml:"timezone" json:"timezone"`
+	ProtectedBudgetPercent *float64        `yaml:"protected-budget-percent" json:"protected-budget-percent"`
+	Schedule               []UsageSchedule `yaml:"schedule" json:"schedule"`
+}
+
+// UnmarshalYAML accepts the initial consumed-percentage format during upgrades.
+// The in-memory representation and subsequent marshaling always use protection.
+func (p *UsagePolicy) UnmarshalYAML(node *yaml.Node) error {
+	type policy UsagePolicy
+	var input struct {
+		policy            `yaml:",inline"`
+		LegacyUsedPercent *float64 `yaml:"five-hour-used-percent"`
+	}
+	data, err := yaml.Marshal(node)
+	if err != nil {
+		return err
+	}
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&input); err != nil {
+		return err
+	}
+	if input.LegacyUsedPercent != nil {
+		if input.ProtectedBudgetPercent != nil {
+			return fmt.Errorf("usage policy cannot specify both protected-budget-percent and five-hour-used-percent")
+		}
+		used := *input.LegacyUsedPercent
+		if math.IsNaN(used) || math.IsInf(used, 0) || used < 0 || used > 100 {
+			return fmt.Errorf("usage policy legacy five-hour-used-percent must be between 0 and 100")
+		}
+		protected := 100 - used
+		input.ProtectedBudgetPercent = &protected
+	}
+	*p = UsagePolicy(input.policy)
+	return nil
 }
 
 // UsageSchedule is a same-day interval; start is inclusive and end exclusive.
@@ -32,9 +67,9 @@ func (r RoutingConfig) validateUsagePolicies() error {
 		if _, err := time.LoadLocation(p.Timezone); err != nil {
 			return fmt.Errorf("usage policy %q timezone: %w", name, err)
 		}
-		limit := p.FiveHourUsedPercent
+		limit := p.ProtectedBudgetPercent
 		if limit == nil || math.IsNaN(*limit) || math.IsInf(*limit, 0) || *limit < 0 || *limit > 100 {
-			return fmt.Errorf("usage policy %q five-hour-used-percent must be between 0 and 100", name)
+			return fmt.Errorf("usage policy %q protected-budget-percent must be between 0 and 100", name)
 		}
 		if len(p.Schedule) == 0 {
 			return fmt.Errorf("usage policy %q requires a schedule", name)

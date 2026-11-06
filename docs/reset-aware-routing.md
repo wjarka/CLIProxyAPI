@@ -122,15 +122,15 @@ combination at startup; Home dispatch also refuses it after a runtime update.
 
 ## Working-hours five-hour guard
 
-A separate named usage policy stops selecting a credential when its five-hour
-consumption reaches a threshold during configured local working hours:
+A separate named usage policy protects part of the five-hour quota during
+configured local working hours, using the weekly reserve's protected-budget convention:
 
 ```yaml
 routing:
   usage-policies:
     work-hours:
       timezone: Europe/Warsaw
-      five-hour-used-percent: 70
+      protected-budget-percent: 30
       schedule:
         - days: [mon, tue, wed, thu, fri]
           start: "09:00"
@@ -141,13 +141,17 @@ routing:
       usage-policy: work-hours
 ```
 
-Account bindings may specify either policy or both. The guard uses **consumed**
-five-hour quota (70 means 30% remains), independently of weekly balance. At 09:00
+Account bindings may specify either policy or both. The guard protects 30% of the
+five-hour quota, blocking at 70% consumed, independently of weekly balance. At 09:00
 it becomes active; at 17:00 it stops applying. Weekends are unrestricted by this
 guard. Timezone rules include daylight saving time. Schedule entries are same-day
 intervals with `HH:MM` start before end; use multiple entries for split workdays.
-Thresholds range from 0 through 100, inclusive; 0 blocks all selections during
-the schedule. Unknown policy references and invalid schedules fail validation.
+Protected percentages range from 0 through 100, inclusive; 0 reserves nothing,
+while 100 blocks all selections during the schedule. Missing or invalid quota
+data still fails closed. Unknown policy references and invalid schedules fail validation.
+The initial `five-hour-used-percent` key is accepted on input for upgrades and
+converted to protection (`70` becomes `30`); specifying both keys is rejected.
+New configuration and status responses use protected percentages.
 
 During protected hours, stale (older than one minute), missing, invalid or expired
 five-hour observations block selection until a read-only refresh succeeds. Fresh
@@ -161,7 +165,8 @@ Pinned credentials, session affinity, retries, mixed-provider routes and schedul
 plugins cannot bypass the guard. When it excludes all matching credentials,
 requests receive HTTP 429 with `quota_usage_guard` (weekly reserve failures retain
 `quota_reserved`). The quota overview exposes a separate `usage_policy` object:
-schedule, timezone, threshold, active interval end, observed consumption/reset,
+schedule, timezone, `protected_percent`, `remaining_percent`, active interval end,
+observed consumption/reset,
 blocked flag and reason (`five_hour_limit` or `quota_unknown`). Configuration edits
 use the validated v8 management API and hot reload, alongside existing reserves.
 Home dispatch is unsupported and rejected for either quota policy.
