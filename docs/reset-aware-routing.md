@@ -120,6 +120,56 @@ duplicate account bindings and references to missing policies are rejected.
 Reserve policies require standalone execution. A Home-mode service rejects this
 combination at startup; Home dispatch also refuses it after a runtime update.
 
+## Working-hours five-hour guard
+
+A separate named usage policy stops selecting a credential when its five-hour
+consumption reaches a threshold during configured local working hours:
+
+```yaml
+routing:
+  usage-policies:
+    work-hours:
+      timezone: Europe/Warsaw
+      five-hour-used-percent: 70
+      schedule:
+        - days: [mon, tue, wed, thu, fri]
+          start: "09:00"
+          end: "17:00"
+  account-policies:
+    - account: work-claude.json
+      reserve-policy: work-account # Existing weekly reserve, defined above.
+      usage-policy: work-hours
+```
+
+Account bindings may specify either policy or both. The guard uses **consumed**
+five-hour quota (70 means 30% remains), independently of weekly balance. At 09:00
+it becomes active; at 17:00 it stops applying. Weekends are unrestricted by this
+guard. Timezone rules include daylight saving time. Schedule entries are same-day
+intervals with `HH:MM` start before end; use multiple entries for split workdays.
+Thresholds range from 0 through 100, inclusive; 0 blocks all selections during
+the schedule. Unknown policy references and invalid schedules fail validation.
+
+During protected hours, stale (older than one minute), missing, invalid or expired
+five-hour observations block selection until a read-only refresh succeeds. Fresh
+weekly data cannot substitute for five-hour data. Claude uses the shared `5h`
+window; Codex identifies the window by its 300-minute duration. Outside protected
+hours the guard requires no quota observation; any weekly reserve and upstream
+cooldown still apply. Both guards share cached, deduplicated metadata reads and
+the existing bounded credential-acquisition wait. Direct provider use is unaffected.
+
+Pinned credentials, session affinity, retries, mixed-provider routes and scheduler
+plugins cannot bypass the guard. When it excludes all matching credentials,
+requests receive HTTP 429 with `quota_usage_guard` (weekly reserve failures retain
+`quota_reserved`). The quota overview exposes a separate `usage_policy` object:
+schedule, timezone, threshold, active interval end, observed consumption/reset,
+blocked flag and reason (`five_hour_limit` or `quota_unknown`). Configuration edits
+use the validated v8 management API and hot reload, alongside existing reserves.
+Home dispatch is unsupported and rejected for either quota policy.
+
+This is a routing threshold, not a hard spending cap: cached provider readings,
+concurrent requests and already-running streams can exceed the threshold before
+a later selection observes the new consumption. Existing streams are not aborted.
+
 ## Codex WebSockets
 
 Upstream already implements the WebSocket transport. Both ends must enable it:
