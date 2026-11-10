@@ -90,6 +90,23 @@ func (m *Manager) request(ctx context.Context, p Provider, session, path, org st
 	case 401:
 		return nil, failure("session_expired")
 	case 403:
+		// Claude also reports revoked Console sessions as a permission_error.
+		// Only its explicit authentication rejection means reconnect; a billing
+		// permission denial must remain distinct from an invalid session.
+		if p == Claude {
+			body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+			var rejection struct {
+				Error struct {
+					Type    string `json:"type"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if readErr == nil && len(body) <= maxResponseBytes && json.Unmarshal(body, &rejection) == nil &&
+				(rejection.Error.Type == "permission_error" || rejection.Error.Type == "authentication_error") &&
+				strings.EqualFold(strings.TrimSpace(rejection.Error.Message), "Invalid authorization") {
+				return nil, failure("session_expired")
+			}
+		}
 		return nil, failure("permission_denied")
 	case 404, 405, 410:
 		return nil, failure("unsupported_endpoint")
