@@ -24,6 +24,7 @@ objectstore/*
 static/*
 
 # Authentication data
+/console-billing/
 auths/*
 /auths
 !auths/.gitkeep
@@ -71,3 +72,6 @@ docker-compose.override.yml
 # Fork documentation and intentionally credential-free example.
 !docs/reset-aware-routing.md
 !examples/reset-aware/config.yaml
+
+# Console billing operator documentation.
+!docs/console-billing.md
