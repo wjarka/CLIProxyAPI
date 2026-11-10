@@ -26,16 +26,19 @@ type diskState struct {
 const FreshnessWindow = 5 * time.Minute
 
 type Manager struct {
-	mu         sync.Mutex
-	dir        string
-	key        []byte
-	client     *http.Client
-	state      diskState
-	revision   [32]byte
-	exists     bool
-	order      uint64
-	published  map[string]uint64
-	generation map[string]uint64
+	mu            sync.Mutex
+	dir           string
+	key           []byte
+	client        *http.Client
+	state         diskState
+	revision      [32]byte
+	exists        bool
+	order         uint64
+	published     map[string]uint64
+	generation    map[string]uint64
+	changes       chan struct{}
+	active        map[string]int
+	manualSuccess map[string]uint64
 }
 
 func NewManager(dir string, client *http.Client) (*Manager, error) {
@@ -64,7 +67,7 @@ func NewManager(dir string, client *http.Client) (*Manager, error) {
 	c.Jar = nil
 	c.Timeout = 0
 	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	m := &Manager{dir: dir, client: &c, generation: make(map[string]uint64), published: make(map[string]uint64), state: diskState{Version: 1, Snapshot: Snapshot{Connections: []Connection{}, Accounts: []Account{}, Bindings: []Binding{}}, Sessions: make(map[string]string)}}
+	m := &Manager{dir: dir, client: &c, changes: make(chan struct{}, 1), active: make(map[string]int), manualSuccess: make(map[string]uint64), generation: make(map[string]uint64), published: make(map[string]uint64), state: diskState{Version: 1, Snapshot: Snapshot{Connections: []Connection{}, Accounts: []Account{}, Bindings: []Binding{}}, Sessions: make(map[string]string)}}
 	statePath := filepath.Join(dir, "billing.enc")
 	keyPath := filepath.Join(dir, "session.key")
 	encrypted, readErr := privateRead(statePath)
@@ -221,10 +224,18 @@ func (m *Manager) backup() diskState {
 	_ = json.Unmarshal(b, &out)
 	return out
 }
+
+// Changes signals committed store changes, coalescing pending notifications.
+func (m *Manager) Changes() <-chan struct{} { return m.changes }
+
 func (m *Manager) save(before diskState) error {
 	if err := m.persist(); err != nil {
 		m.state = before
 		return err
+	}
+	select {
+	case m.changes <- struct{}{}:
+	default:
 	}
 	return nil
 }
@@ -348,6 +359,8 @@ func (m *Manager) Reconnect(ctx context.Context, id, session string) (Connection
 		return Connection{}, err
 	}
 	c := m.state.Snapshot.Connections[i]
+	m.active[id]++
+	defer m.finishOperation(id)
 	m.generation[id]++
 	generation := m.generation[id]
 	m.order++
@@ -377,6 +390,7 @@ func (m *Manager) Reconnect(ctx context.Context, id, session string) (Connection
 	if err = m.save(before); err != nil {
 		return Connection{}, err
 	}
+	m.manualSuccess[id]++
 	out := m.state.Snapshot.Connections[i]
 	out.AccountIDs = append([]string{}, out.AccountIDs...)
 	return out, nil
@@ -399,6 +413,10 @@ func (m *Manager) markFailed(id string, err error) {
 	}
 }
 func (m *Manager) Refresh(ctx context.Context, id string) error {
+	return m.refresh(ctx, id, false)
+}
+
+func (m *Manager) refresh(ctx context.Context, id string, background bool) error {
 	m.mu.Lock()
 	i, err := m.connection(id)
 	if err != nil {
@@ -406,11 +424,17 @@ func (m *Manager) Refresh(ctx context.Context, id string) error {
 		return err
 	}
 	c := m.state.Snapshot.Connections[i]
+	if background && (m.active[id] > 0 || c.Status == "reconnect_required") {
+		m.mu.Unlock()
+		return errRefreshSkipped
+	}
 	session := m.state.Sessions[id]
 	if session == "" {
 		m.mu.Unlock()
 		return failure("session_expired")
 	}
+	m.active[id]++
+	defer m.finishOperation(id)
 	m.generation[id]++
 	generation := m.generation[id]
 	m.order++
@@ -428,6 +452,9 @@ func (m *Manager) Refresh(ctx context.Context, id string) error {
 	if m.generation[id] != generation {
 		return failure("superseded")
 	}
+	if ctx.Err() != nil {
+		return failure("provider_unavailable")
+	}
 	before := m.backup()
 	if refreshErr != nil {
 		m.markFailed(id, refreshErr)
@@ -436,6 +463,9 @@ func (m *Manager) Refresh(ctx context.Context, id string) error {
 	}
 	if err = m.save(before); err != nil {
 		return err
+	}
+	if !background && refreshErr == nil {
+		m.manualSuccess[id]++
 	}
 	return refreshErr
 }
@@ -521,4 +551,13 @@ func (m *Manager) Unbind(credentialID string) error {
 	}
 	m.state.Snapshot.Bindings = out
 	return m.save(before)
+}
+
+func (m *Manager) finishOperation(id string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.active[id]--
+	if m.active[id] == 0 {
+		delete(m.active, id)
+	}
 }
