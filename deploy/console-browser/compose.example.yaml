@@ -1,0 +1,54 @@
+# Merge with the existing CLIProxy Compose files; do not publish broker/VNC/CDP ports.
+# Build/use a matching backend and dashboard before enabling this override.
+# Adapt cli-proxy-api and retain its existing networks if your deployment differs.
+services:
+  cli-proxy-api:
+    environment:
+      CLIPROXY_CONSOLE_BROWSER_URL: http://console-browser:8320
+      CLIPROXY_CONSOLE_BROWSER_TOKEN_FILE: /run/secrets/console-browser-token
+    volumes:
+      - ${CLIPROXY_BROWSER_TOKEN_FILE:?Set an absolute host token file}:/run/secrets/console-browser-token:ro
+    networks:
+      default: {}
+      console-browser: {}
+
+  console-browser:
+    image: ${CLIPROXY_BROWSER_IMAGE:-cliproxy-console-browser:local}
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    # Init configures this container's egress rules and then drops every capability.
+    cap_add:
+      - NET_ADMIN
+      - SETUID
+      - SETGID
+      - SETPCAP
+      - CHOWN
+    security_opt:
+      - no-new-privileges:true
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: '1'
+      net.ipv6.conf.default.disable_ipv6: '1'
+    cpus: 2
+    mem_limit: 2g
+    pids_limit: 768
+    shm_size: 256m
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,mode=1777,size=192m
+      - /run/console-browser:rw,nosuid,nodev,noexec,mode=0700,uid=65532,gid=65532,size=384m
+    volumes:
+      - ${CLIPROXY_BROWSER_TOKEN_FILE:?Set an absolute host token file}:/run/secrets/console-browser-token:ro
+    networks:
+      console-browser: {}
+    stop_grace_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '2'
+
+networks:
+  console-browser:
+    driver: bridge
+    enable_ipv6: false

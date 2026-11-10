@@ -6,6 +6,18 @@ This release supplies balances, credit grants and expiration dates, connection h
 
 ## Connect a Console
 
+When hosted login is configured, **Billing → Connect Console** offers an
+in-dashboard browser. Choose a provider and connection name, start the browser,
+sign in to the intended Console, then click **Finish**. Reconnect follows the
+same flow while retaining the existing connection ID and mappings. Cancel or
+an incomplete login does not replace a working connection. Temporary browsers
+expire after 15 minutes. See [Hosted Console login](console-browser-hosting.md)
+for broker installation and compatibility limits.
+
+### Local helper and manual fallback
+
+If hosted login is unavailable, use manual session import or the local helper:
+
 1. Open **Billing → Connect Console**, choose Claude or OpenAI and enter a descriptive label.
 2. Download the login helper from that page. The download uses your existing management authentication.
 3. Run the copied command locally, for example:
