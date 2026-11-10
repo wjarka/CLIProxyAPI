@@ -2,7 +2,12 @@
 
 The management UI's **Billing** page connects Claude and OpenAI Console accounts separately from inference credentials. Connect three independent logins as three named connections, or use a single login that can read several organizations. Accounts are identified by provider and organization ID; several API keys can share one account and balance.
 
-This release supplies balances, credit grants and expiration dates, connection health, and API-key association. It does not yet apply billing balances to credential selection, dollar reserves, earliest-expiration scheduling, or routing tiers. Existing priority, strategy, session affinity and quota protection behave as before.
+Console observations now participate in the configured routing strategy. Under
+`earliest-reset`, verified API organizations are ranked by their earliest future
+credit grant expiration with a known positive remaining amount. Ordinary model
+availability, cooldowns and credential priority are evaluated first. Round-robin,
+fill-first and weighted strategies retain their existing behavior. This does not
+add routing tiers, dollar reserves or balance-based quota protection.
 
 ## Connect a Console
 
@@ -52,9 +57,57 @@ OpenAI verification honors fixed `OpenAI-Organization` and `OpenAI-Project` cred
 
 - A balance is the last observed USD credit balance, not a subscription usage limit. Missing amounts remain unknown; a reported zero remains zero.
 - Grant amounts, remaining credits and expiration dates are shown only when provided. Expired grants remain visible. A missing expiration is not treated as unlimited or as an upcoming reset.
-- **Refresh balance** fetches provider data on demand. There is no background provider polling in this release. After five minutes, a successful observation becomes stale in both API snapshots and an open UI page.
+- The service refreshes active Console connections at startup and every 60 seconds,
+  independently of whether Billing or Quota Management is open. Transient failures
+  use bounded exponential backoff; expired sessions wait for reconnect. **Refresh
+  balance** still fetches on demand. After five minutes, observations become stale
+  and cease to influence grant ranking.
 - Failed requests preserve the last observation and show a safe error. A multi-organization login can expose readable organizations while showing denied organizations as unknown or stale. A successful observation from another connection is retained.
 - No fresh balance or usable credits are inferred from an expired session, permission denial, unsupported response, or unknown field.
+
+## Grant selection and session affinity
+
+Select `earliest-reset` in the existing routing configuration:
+
+```yaml
+routing:
+  strategy: earliest-reset
+```
+
+Under `earliest-reset`, a verified API key uses its organization's earliest future
+expiration among grants with a known positive remaining amount. Exhausted, expired,
+unknown and invalid grant values do not supply a date. When the next successful
+observation reports that grant used up, the organization's next remaining grant
+becomes its date and another eligible organization can take over. Provider reports
+are observed rather than estimated from token usage, so the change is detected on
+refresh, not at the exact moment of a debit.
+
+For example, A with remaining grants expiring November 11 and December 11 ranks
+ahead of B expiring November 15. After A's November 11 grant is reported exhausted,
+B ranks ahead of A's December 11 grant. Sessions follow that change. Within a
+still-winning organization, or when dates tie, an eligible existing key binding
+stays sticky. Explicit session IDs, parent aliases and content-prefix affinity
+use the same rule. OAuth affinity and other strategies retain their existing rules.
+
+Only verified links matching the current key, endpoint and custom headers can
+supply grant dates. Renaming a key preserves verification. Unlinking, replacing a
+key, disconnecting a login or losing fresh billing access removes its grant
+preference. Unknown or stale organizations remain ordinary routing candidates;
+Console failures do not disable inference keys. A known empty aggregate balance
+also removes the grant preference rather than introducing a new blocking policy.
+Fresh authoritative grants can still rank an organization whose aggregate balance
+is unknown. If no usable date exists, the strategy uses its existing fallback.
+
+Scheduling reads an immutable in-memory view: inference requests never wait for
+Console network calls or encrypted-store reads. Management and background refresh
+share one store, and committed updates replace that view. Shutdown cancels and
+drains automatic refreshes before retiring it. If the service cannot open its
+billing store at startup, inference continues and Billing reports unavailable;
+fix the storage issue and restart to restore the shared store and polling.
+Background work is bounded to four concurrent requests and follows the server's
+existing policy of no added network timeouts. One stalled request does not block
+other free slots; if every slot stalls, polling waits for a response or shutdown.
+The five-minute freshness limit still retires old routing preferences.
 
 ## Persistence and deployment
 
