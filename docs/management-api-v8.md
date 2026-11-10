@@ -161,3 +161,45 @@ accepts legacy, new, or mixed layouts, normalizing v8 documents on save.
 
 Plugin OAuth uses the shared v8 login endpoint. Other plugin-defined HTTP
 extensions retain their declared `/v0/management` routes.
+
+## Console billing
+
+All paths below are relative to `/v8/management`, require management authentication,
+and return `Cache-Control: no-store`. Home mode disables them. Console sessions
+are separate from inference credentials and are never returned in a response.
+See [Console setup and deployment](console-billing.md) for the local login helper,
+persistent storage and provider compatibility limitations.
+
+| Path | Method | Body / behavior |
+| --- | --- | --- |
+| `/billing` | GET | `{connections, accounts, bindings, credentials}`; snapshots and eligible first-party API-key summaries, without secrets. |
+| `/billing/connections` | POST | `{provider: "claude" or "openai", label, session}`; validate Console login and discover organizations; returns `{connection}`. |
+| `/billing/connections/:id` | PATCH | `{session}`; reconnect the same provider and require organization continuity; returns `{connection}`. |
+| `/billing/connections/:id` | DELETE | Disconnect and remove the session; retain accounts, stale snapshots and mappings; returns `{status:"ok"}`. |
+| `/billing/connections/:id/refresh` | POST | Fetch current balances; preserve snapshots on failure; returns `{status:"ok"}`. |
+| `/billing/bindings` | PUT | `{credential_id, account_id}`; same-provider manual association, resets verification. |
+| `/billing/bindings?credential_id=...` | DELETE | Remove an association. |
+| `/billing/credentials/verify` | POST | `{credential_id}`; read-only first-party organization probe; returns `{binding}`. |
+| `/billing/login-helper` | GET | Download `console-login.py` for an isolated local browser login. |
+
+Accounts have stable `id` (`provider:organization_id`), `provider`, `organization_id`,
+`name`, `connection_id`, nullable USD `balance`, `currency`, `grants`, optional
+`observed_at`, `status` and optional safe `error`. Grants have `id`, `name`, `kind`,
+nullable `amount`, `remaining` and `expires_at`. Missing values mean unknown.
+Observations older than five minutes are stale. Refresh is manual; these endpoints
+do not change credential routing or enforce spending protections.
+
+Connections include `id`, `provider`, `label`, `account_ids`, `status`, `updated_at`
+and optional safe `error`. Bindings include `credential_id`, `account_id`, `verified`.
+Credential summaries include `id`, `label`, `provider`, optional `organization_id`
+and `verification_status` (`unlinked`, `unverified`, `verified`). Verification is
+invalidated when credential identity or custom headers change. Manual association
+and missing organization response headers do not establish verified ownership.
+
+Errors return `{error: "fixed_safe_code"}` without upstream response bodies. Invalid
+input is 400, missing resources 404, organization mismatch or concurrent mutation
+409, and provider/session errors 502. Expired Console sessions return
+`session_expired`, not management 401. An unreadable local store returns 503 with
+`billing_storage_unavailable`. Malformed/unknown provider schemas are errors rather
+than a zero balance. Partial billing permission preserves readable organizations
+and marks unreadable accounts unknown or stale with their safe error.
