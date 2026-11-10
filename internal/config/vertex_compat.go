@@ -17,6 +17,9 @@ type VertexCompatKey struct {
 	// Maps to the x-goog-api-key header.
 	APIKey string `yaml:"api-key" json:"api-key"`
 
+	// Label is an optional display name; it does not affect credential identity or routing.
+	Label string `yaml:"label,omitempty" json:"label,omitempty"`
+
 	// Priority controls selection preference when multiple credentials match.
 	// Higher values are preferred; defaults to 0.
 	Priority int `yaml:"priority,omitempty" json:"priority,omitempty"`

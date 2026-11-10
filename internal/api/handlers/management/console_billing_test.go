@@ -61,7 +61,7 @@ func TestConsoleBillingListsOnlyFirstPartyAPIKeysWithoutSecrets(t *testing.T) {
 		t.Fatalf("status %d: %s", response.Code, response.Body.String())
 	}
 	var got struct {
-		Credentials                     []struct{ ID, Provider string }
+		Credentials                     []struct{ ID, Provider, Label string }
 		Connections, Accounts, Bindings []json.RawMessage
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &got); err != nil {
@@ -69,6 +69,12 @@ func TestConsoleBillingListsOnlyFirstPartyAPIKeysWithoutSecrets(t *testing.T) {
 	}
 	if len(got.Credentials) != 2 || got.Connections == nil || got.Accounts == nil || got.Bindings == nil {
 		t.Fatalf("unexpected snapshot %s", response.Body.String())
+	}
+	for _, credential := range got.Credentials {
+		want := map[string]string{"claude-api": "Claude API", "openai-api": "OpenAI API"}[credential.ID]
+		if credential.Label != want {
+			t.Errorf("credential %s label = %q, want %q", credential.ID, credential.Label, want)
+		}
 	}
 	for _, secret := range []string{"never-show", `"oauth"`, `"third-party"`, `"api_key"`, `"session"`} {
 		if strings.Contains(response.Body.String(), secret) {
@@ -182,5 +188,14 @@ func TestConsoleBillingDownloadHelperContainsNoSecrets(t *testing.T) {
 	response := billingTestRequest(newBillingTestHandler(t), "GET", "/billing/login-helper", "")
 	if response.Code != 200 || !strings.Contains(response.Body.String(), "--provider") || !strings.Contains(response.Body.String(), "getpass") {
 		t.Fatalf("missing login helper: %d", response.Code)
+	}
+}
+
+func TestConsoleBillingRenamePreservesVerificationFingerprint(t *testing.T) {
+	auth := &coreauth.Auth{ID: "key", Label: "Old name", Provider: "claude", Attributes: map[string]string{"api_key": "fake-key"}}
+	before := billingCredentialFingerprint(auth, "claude")
+	auth.Label = "Personal account"
+	if before == "" || billingCredentialFingerprint(auth, "claude") != before {
+		t.Fatal("renaming a key must preserve its Console verification")
 	}
 }

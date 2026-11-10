@@ -115,7 +115,7 @@ func (s *ConfigSynthesizer) synthesizeGeminiKeyEntries(ctx *SynthesisContext, en
 		a := &coreauth.Auth{
 			ID:         id,
 			Provider:   provider,
-			Label:      label,
+			Label:      apiKeyLabel(entry.Label, label),
 			Prefix:     prefix,
 			Status:     coreauth.StatusActive,
 			ProxyURL:   proxyURL,
@@ -183,7 +183,7 @@ func (s *ConfigSynthesizer) synthesizeClaudeKeys(ctx *SynthesisContext) []*corea
 		a := &coreauth.Auth{
 			ID:         id,
 			Provider:   "claude",
-			Label:      "claude-apikey",
+			Label:      apiKeyLabel(ck.Label, "claude-apikey"),
 			Prefix:     prefix,
 			Status:     coreauth.StatusActive,
 			ProxyURL:   proxyURL,
@@ -268,7 +268,7 @@ func (s *ConfigSynthesizer) synthesizeCodexStyleKeys(ctx *SynthesisContext, entr
 		a := &coreauth.Auth{
 			ID:         id,
 			Provider:   provider,
-			Label:      provider + "-apikey",
+			Label:      apiKeyLabel(entry.Label, provider+"-apikey"),
 			Prefix:     prefix,
 			Status:     coreauth.StatusActive,
 			ProxyURL:   strings.TrimSpace(entry.ProxyURL),
@@ -342,7 +342,7 @@ func (s *ConfigSynthesizer) synthesizeOpenAICompat(ctx *SynthesisContext) []*cor
 			a := &coreauth.Auth{
 				ID:         id,
 				Provider:   internalProviderKey,
-				Label:      compat.Name,
+				Label:      apiKeyLabel(entry.Label, compat.Name),
 				Prefix:     prefix,
 				Status:     coreauth.StatusActive,
 				ProxyURL:   proxyURL,
@@ -443,7 +443,7 @@ func (s *ConfigSynthesizer) synthesizeVertexCompat(ctx *SynthesisContext) []*cor
 		a := &coreauth.Auth{
 			ID:         id,
 			Provider:   providerName,
-			Label:      "vertex-apikey",
+			Label:      apiKeyLabel(compat.Label, "vertex-apikey"),
 			Prefix:     prefix,
 			Status:     coreauth.StatusActive,
 			ProxyURL:   proxyURL,
@@ -459,4 +459,12 @@ func (s *ConfigSynthesizer) synthesizeVertexCompat(ctx *SynthesisContext) []*cor
 		out = append(out, a)
 	}
 	return out
+}
+
+// apiKeyLabel keeps display names separate from stable credential identifiers.
+func apiKeyLabel(label, fallback string) string {
+	if label = strings.TrimSpace(label); label != "" {
+		return label
+	}
+	return fallback
 }
