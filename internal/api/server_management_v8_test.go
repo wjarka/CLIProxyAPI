@@ -39,15 +39,16 @@ func TestManagementV8RoutesShareAccessControl(t *testing.T) {
 				t.Fatal(err)
 			}
 			cfg.Home.Enabled = tc.home
+			cfg.RemoteManagement.AllowRemote = true // Distinct clients isolate the failed-login counter per route.
 			cfg.Plugins.Dir = filepath.Dir(path)
 			h := management.NewHandler(cfg, path, nil)
 			h.SetLocalPassword("test-password")
 			s := &Server{cfg: cfg, engine: gin.New(), mgmt: h}
 			s.managementRoutesEnabled.Store(tc.enabled)
 			s.registerManagementRoutes()
-			for _, route := range []string{"/v0/management/config", "/v8/management/config", "/v0/management/plugins", "/v8/management/plugins", "/v8/management/credentials/quota-overview"} {
+			for routeIndex, route := range []string{"/v0/management/config", "/v8/management/config", "/v0/management/plugins", "/v8/management/plugins", "/v8/management/credentials/quota-overview", "/v8/management/billing", "/v8/management/billing/login-helper"} {
 				req := httptest.NewRequest(http.MethodGet, route, nil)
-				req.RemoteAddr = "127.0.0.1:1234"
+				req.RemoteAddr = fmt.Sprintf("127.0.0.%d:1234", routeIndex+1)
 				if tc.authorized {
 					req.Header.Set("Authorization", "Bearer test-password")
 				}
@@ -89,6 +90,11 @@ func TestManagementV8IndependentContract(t *testing.T) {
 		"GET /v0/management/debug", "PUT /v0/management/request-retry", "GET /v0/management/auth-files",
 		"GET /v8/management/observability/logs", "GET /v8/management/observability/usage/queue",
 		"GET /v8/management/credentials", "POST /v8/management/credentials",
+		"GET /v8/management/billing", "POST /v8/management/billing/connections",
+		"PATCH /v8/management/billing/connections/:id", "DELETE /v8/management/billing/connections/:id",
+		"POST /v8/management/billing/connections/:id/refresh", "PUT /v8/management/billing/bindings",
+		"DELETE /v8/management/billing/bindings", "POST /v8/management/billing/credentials/verify",
+		"GET /v8/management/billing/login-helper",
 		"GET /v8/management/oauth/auth-url", "POST /v8/management/oauth/import", "POST /v8/management/oauth/callback",
 		"POST /v8/management/routing/cooldown/reset",
 		"GET /v8/management/plugins/:id/quota", "POST /v8/management/plugins/:id/quota", "DELETE /v8/management/plugins/:id/quota",

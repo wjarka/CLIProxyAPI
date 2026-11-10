@@ -27,6 +27,16 @@ func (s *Server) registerManagementV8Routes() {
 		v8.Handle(method, "/config/*path", s.mgmt.ConfigV8)
 	}
 
+	v8.GET("/billing", s.mgmt.GetConsoleBilling)
+	v8.POST("/billing/connections", s.mgmt.ConnectConsoleBilling)
+	v8.PATCH("/billing/connections/:id", s.mgmt.ReconnectConsoleBilling)
+	v8.DELETE("/billing/connections/:id", s.mgmt.DeleteConsoleBilling)
+	v8.POST("/billing/connections/:id/refresh", s.mgmt.RefreshConsoleBilling)
+	v8.PUT("/billing/bindings", s.mgmt.BindConsoleBilling)
+	v8.DELETE("/billing/bindings", s.mgmt.UnbindConsoleBilling)
+	v8.POST("/billing/credentials/verify", s.mgmt.VerifyConsoleBillingCredential)
+	v8.GET("/billing/login-helper", s.mgmt.DownloadConsoleLoginHelper)
+
 	v8.GET("/server/latest-version", s.mgmt.GetLatestVersion)
 	v8.POST("/requests/api-call", s.mgmt.APICall)
 	v8.POST("/routing/cooldown/reset", s.mgmt.ResetQuota)
