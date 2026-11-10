@@ -12,6 +12,6 @@ COPY deploy/console-browser/entrypoint.sh /usr/local/bin/console-browser-init
 RUN chmod 0755 /usr/local/bin/console-browser-init
 ENV HOME=/run/console-browser
 EXPOSE 8320
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD ["/usr/local/bin/console-browser", "--healthcheck"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD ["setpriv", "--reuid=65532", "--regid=65532", "--clear-groups", "--inh-caps=-all", "--ambient-caps=-all", "--bounding-set=-all", "--no-new-privs", "/usr/local/bin/console-browser", "--healthcheck"]
 ENTRYPOINT ["/usr/local/bin/console-browser-init"]
 CMD ["/usr/local/bin/console-browser"]

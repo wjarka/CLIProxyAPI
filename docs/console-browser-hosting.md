@@ -60,7 +60,8 @@ storage, resource limits and unpublished VNC/CDP ports are part of this setup.
 Do not add a Docker socket, host networking, privileged mode or a public broker
 port to work around startup failures.
 
-The broker health check reads its token file internally. Start and verify it
+The broker health check drops to UID 65532 before reading its owner-only token
+file; Docker otherwise starts health-check processes with the image default UID. Start and verify it
 before enabling the new backend environment. It is optional: a broker outage
 must not stop the inference proxy. Deploy the matching management HTML separately.
 Back up the current image/HTML and preserve the existing `console-billing` volume
