@@ -28,10 +28,11 @@ func (s *EarliestResetSelector) Pick(ctx context.Context, provider, model string
 		return nil, err
 	}
 	available = preferCodexWebsocketAuths(ctx, provider, available)
+	resets := consoleOrganizationResets(ctx, available, now)
 	var selected *Auth
 	var earliest time.Time
 	for _, candidate := range available {
-		reset := WeeklyQuotaReset(candidate, model, now)
+		reset := selectorReset(ctx, candidate, model, now, resets)
 		if !reset.IsZero() && (selected == nil || reset.Before(earliest)) {
 			selected, earliest = candidate, reset
 		}

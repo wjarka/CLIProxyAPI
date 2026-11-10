@@ -954,6 +954,38 @@ func (m *MerklePrefixMatcher) TouchFingerprintsWithContext(namespace string, fin
 	return m.touchLocked(namespace, fingerprints, tailFingerprints, envDigest, minPrefixLength, strings.TrimSpace(authID), m.now())
 }
 
+// TouchFingerprintsWithContextBefore rejects a stale result if a
+// newer request rebound the same session to another credential. The check and
+// touch share the matcher lock, preventing late extensions from reviving it.
+func (m *MerklePrefixMatcher) TouchFingerprintsWithContextBefore(namespace string, fingerprints, tailFingerprints []string, envDigest string, minPrefixLength int, authID, sessionID string, generation uint64) bool {
+	if m == nil || strings.TrimSpace(namespace) == "" || strings.TrimSpace(authID) == "" {
+		return false
+	}
+	if len(tailFingerprints) == 0 {
+		tailFingerprints = extractTailFingerprints(fingerprints)
+	}
+	if envDigest == "" {
+		envDigest = fallbackEnvironmentDigest(fingerprints, minPrefixLength)
+	}
+	var ok bool
+	if fingerprints, minPrefixLength, ok = m.sanitizeFingerprints(fingerprints, minPrefixLength); !ok {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.prepareLocked()
+	if sessionID != "" && generation > 0 {
+		if ns := m.groups[namespace]; ns != nil {
+			for _, group := range ns.groups {
+				if group.sessionID == sessionID && group.authID != authID && group.lastAccessNumber > generation && m.now().Before(group.expiresAt) {
+					return false
+				}
+			}
+		}
+	}
+	return m.touchLocked(namespace, fingerprints, tailFingerprints, envDigest, minPrefixLength, strings.TrimSpace(authID), m.now())
+}
+
 // Remove removes the exact request sequence when it is still bound to authID.
 func (m *MerklePrefixMatcher) Remove(namespace string, turns []CanonicalTurn, authID string) bool {
 	fingerprints, _ := m.Prepare(turns)

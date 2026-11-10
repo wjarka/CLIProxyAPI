@@ -970,11 +970,19 @@ func (s *SessionAffinitySelector) Trees() *cliproxysession.InMemorySessionTreeSt
 // Note: The cache key includes provider, session ID, and model to handle cases where
 // a session uses multiple models (e.g., gemini-2.5-pro and gemini-3-flash-preview)
 // that may be supported by different auth credentials, and to avoid cross-provider conflicts.
-func (s *SessionAffinitySelector) Pick(ctx context.Context, provider, model string, opts cliproxyexecutor.Options, auths []*Auth) (*Auth, error) {
+func (s *SessionAffinitySelector) Pick(ctx context.Context, provider, model string, opts cliproxyexecutor.Options, auths []*Auth) (selected *Auth, pickErr error) {
 	entry := selectorLogEntry(ctx)
 	if opts.Metadata == nil {
 		opts.Metadata = make(map[string]any)
 	}
+	defer func() {
+		delete(opts.Metadata, consoleRoutingLCPGuardKey)
+		if _, enabled := s.fallback.(*EarliestResetSelector); enabled && selected != nil {
+			if _, verified := consoleObservation(ctx, selected); verified {
+				opts.Metadata[consoleRoutingLCPGuardKey] = true
+			}
+		}
+	}()
 	opts.Metadata[cliproxyexecutor.SessionAffinityProviderMetadataKey] = provider
 	opts.Metadata[cliproxyexecutor.SessionAffinityModelMetadataKey] = model
 
@@ -1058,7 +1066,7 @@ func (s *SessionAffinitySelector) Pick(ctx context.Context, provider, model stri
 
 	if cachedAuthID, ok := s.cache.GetAndRefresh(cacheKey); ok {
 		for _, auth := range available {
-			if auth.ID == cachedAuthID {
+			if auth.ID == cachedAuthID && s.keepConsoleAffinity(ctx, auth, available, provider, model, now) {
 				bind(auth.ID)
 				entry.Infof("session-affinity: cache hit | session=%s auth=%s provider=%s model=%s", truncateSessionID(primaryID), auth.ID, provider, model)
 				return auth, nil
@@ -1080,7 +1088,7 @@ func (s *SessionAffinitySelector) Pick(ctx context.Context, provider, model stri
 	if fallbackKey != "" {
 		if cachedAuthID, ok := s.cache.Get(fallbackKey); ok {
 			for _, auth := range available {
-				if auth.ID == cachedAuthID {
+				if auth.ID == cachedAuthID && s.keepConsoleAffinity(ctx, auth, available, provider, model, now) {
 					if !isSubagent || s.subagentAffinity {
 						bind(auth.ID)
 						if isFork {
@@ -1145,7 +1153,7 @@ func (s *SessionAffinitySelector) pickLCP(ctx context.Context, provider, model s
 
 	if match, ok := s.matcher.MatchFingerprintsWithContext(namespace, fingerprints, tailFingerprints, envDigest, minPrefixLength); ok {
 		for _, auth := range available {
-			if auth == nil || auth.ID != match.AuthID {
+			if auth == nil || auth.ID != match.AuthID || !s.keepConsoleAffinity(ctx, auth, available, provider, model, time.Now()) {
 				continue
 			}
 			if match.SessionID != "" {
@@ -1496,7 +1504,13 @@ func (s *SessionAffinitySelector) OnResult(res Result) {
 			}
 			if len(fingerprints) > 0 && minPrefixLength > 0 && minPrefixLength <= len(fingerprints) {
 				if res.Success {
-					s.matcher.TouchFingerprintsWithContext(namespace, fingerprints, tailFingerprints, envDigest, minPrefixLength, res.AuthID)
+					if guarded, _ := res.Options.Metadata[consoleRoutingLCPGuardKey].(bool); guarded {
+						sessionID, _ := res.Options.Metadata[cliproxyexecutor.LCPAffinitySessionIDMetadataKey].(string)
+						generation, _ := res.Options.Metadata[cliproxyexecutor.LCPAccessGenerationMetadataKey].(uint64)
+						s.matcher.TouchFingerprintsWithContextBefore(namespace, fingerprints, tailFingerprints, envDigest, minPrefixLength, res.AuthID, sessionID, generation)
+					} else {
+						s.matcher.TouchFingerprintsWithContext(namespace, fingerprints, tailFingerprints, envDigest, minPrefixLength, res.AuthID)
+					}
 				} else {
 					var generation uint64
 					if res.Options.Metadata != nil {
