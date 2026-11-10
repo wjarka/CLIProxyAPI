@@ -3,6 +3,7 @@ package consolebilling
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -379,5 +380,46 @@ func TestVerifiedFingerprintPersistsAndManualBindingClearsIt(t *testing.T) {
 	b = restored.List().Bindings[0]
 	if b.Verified || b.VerificationFingerprint != "" {
 		t.Fatal("manual rebind retained obsolete verification")
+	}
+}
+
+func TestCanceledDiscoveryCannotPublishConnectOrReconnect(t *testing.T) {
+	for _, reconnect := range []bool{false, true} {
+		t.Run(fmt.Sprint(reconnect), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var cancelDiscovery bool
+			m := newTestManager(t, fixtureClient(func(r *http.Request) *http.Response {
+				if r.URL.Path == "/api/organizations" {
+					return response(200, `[{"uuid":"org-one","capabilities":["api"]}]`)
+				}
+				if cancelDiscovery {
+					cancel()
+				}
+				return response(200, `{"amount":500}`)
+			}))
+			var id string
+			if reconnect {
+				c, err := m.Connect(context.Background(), Claude, "existing", "old")
+				if err != nil {
+					t.Fatal(err)
+				}
+				id = c.ID
+				if err = m.Bind("key", c.AccountIDs[0], true); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before := m.List()
+			cancelDiscovery = true
+			var err error
+			if reconnect {
+				_, err = m.Reconnect(ctx, id, "replacement")
+			} else {
+				_, err = m.Connect(ctx, Claude, "new", "replacement")
+			}
+			if err == nil || !reflect.DeepEqual(before, m.List()) {
+				t.Fatal("canceled discovery published connection state")
+			}
+		})
 	}
 }

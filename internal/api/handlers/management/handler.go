@@ -17,6 +17,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/buildinfo"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/consolebilling"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/consolebrowser"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/pluginhost"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/pluginstore"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v8/sdk/auth"
@@ -39,6 +40,7 @@ const attemptMaxIdleTime = 2 * time.Hour
 
 // Handler aggregates config reference, persistence path and helpers.
 type Handler struct {
+	consoleBrowser          *consoleBrowserState
 	consoleBillingMu        sync.Mutex
 	consoleBilling          *consolebilling.Manager
 	billingHTTPClient       *http.Client
@@ -85,6 +87,9 @@ func NewHandler(cfg *config.Config, configFilePath string, manager *coreauth.Man
 		tokenStore:          sdkAuth.GetTokenStore(),
 		allowRemoteOverride: envSecret != "",
 		envSecret:           envSecret,
+	}
+	if client := consolebrowser.NewClientFromEnv(); client != nil {
+		h.consoleBrowser = newConsoleBrowserState(client)
 	}
 	h.startAttemptCleanup()
 	return h

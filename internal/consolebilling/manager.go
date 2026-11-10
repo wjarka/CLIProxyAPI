@@ -314,6 +314,9 @@ func (m *Manager) Connect(ctx context.Context, provider Provider, label, session
 	id := hex.EncodeToString(idBytes)
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if ctx.Err() != nil {
+		return Connection{}, failure("provider_unavailable")
+	}
 	before := m.backup()
 	m.state.Snapshot.Connections = append(m.state.Snapshot.Connections, Connection{ID: id, Provider: provider, Label: label, AccountIDs: []string{}})
 	m.publish(id, d, order)
@@ -365,6 +368,9 @@ func (m *Manager) Reconnect(ctx context.Context, id, session string) (Connection
 	}
 	if m.generation[id] != generation {
 		return Connection{}, failure("superseded")
+	}
+	if ctx.Err() != nil {
+		return Connection{}, failure("provider_unavailable")
 	}
 	before := m.backup()
 	m.publish(id, d, order)

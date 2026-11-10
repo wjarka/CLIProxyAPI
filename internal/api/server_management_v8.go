@@ -11,6 +11,7 @@ import (
 // Configuration paths mirror the v8 YAML tree; operational routes use its groups.
 func (s *Server) registerManagementV8Routes() {
 	const prefix = "/v8/management"
+	s.engine.GET(prefix+"/billing/browser/sessions/:id/view", s.managementAvailabilityMiddleware(), s.mgmt.ConsoleBrowserView)
 	s.engine.GET(prefix+"/oauth/callback", s.managementAvailabilityMiddleware(), s.mgmt.GetOAuthCallback)
 	s.engine.POST(prefix+"/oauth/callback", s.managementAvailabilityMiddleware(), s.mgmt.PostOAuthCallback)
 
@@ -27,6 +28,12 @@ func (s *Server) registerManagementV8Routes() {
 		v8.Handle(method, "/config/*path", s.mgmt.ConfigV8)
 	}
 
+	v8.GET("/billing/browser", s.mgmt.GetConsoleBrowser)
+	v8.POST("/billing/browser/sessions", s.mgmt.CreateConsoleBrowserSession)
+	v8.GET("/billing/browser/sessions/:id", s.mgmt.GetConsoleBrowserSession)
+	v8.DELETE("/billing/browser/sessions/:id", s.mgmt.DeleteConsoleBrowserSession)
+	v8.POST("/billing/browser/sessions/:id/view-ticket", s.mgmt.ConsoleBrowserViewTicket)
+	v8.POST("/billing/browser/sessions/:id/finish", s.mgmt.FinishConsoleBrowserSession)
 	v8.GET("/billing", s.mgmt.GetConsoleBilling)
 	v8.POST("/billing/connections", s.mgmt.ConnectConsoleBilling)
 	v8.PATCH("/billing/connections/:id", s.mgmt.ReconnectConsoleBilling)
