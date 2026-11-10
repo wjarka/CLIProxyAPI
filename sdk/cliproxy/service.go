@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/api"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/consolebilling"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/home"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/homeplugins"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/pluginhost"
@@ -26,6 +27,11 @@ import (
 // It manages the complete lifecycle including authentication, file watching, HTTP server,
 // and integration with various AI service providers.
 type Service struct {
+	consoleBillingMu     sync.Mutex
+	consoleBilling       *consolebilling.Manager
+	consoleBillingCancel context.CancelFunc
+	consoleBillingDone   <-chan struct{}
+
 	// cfg holds the current application configuration.
 	cfg *config.Config
 

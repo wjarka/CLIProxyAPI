@@ -128,7 +128,9 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 
 	// handlers no longer depend on legacy clients; pass nil slice initially
-	s.server = api.NewServer(s.cfg, s.coreManager, s.accessManager, s.configPath, s.serverOptions...)
+	serverOptions := append([]api.ServerOption(nil), s.serverOptions...)
+	serverOptions = append(serverOptions, s.startConsoleBilling(ctx)...)
+	s.server = api.NewServer(s.cfg, s.coreManager, s.accessManager, s.configPath, serverOptions...)
 	s.syncPluginRuntimeConfig(ctx)
 	if homeEnabled {
 		s.syncPluginModelRuntime(ctx)
@@ -248,6 +250,10 @@ func (s *Service) Shutdown(ctx context.Context) error {
 		s.homeMu.Unlock()
 		if runCancel != nil {
 			runCancel()
+		}
+
+		if err := s.stopConsoleBilling(ctx); err != nil {
+			shutdownErr = err
 		}
 
 		s.homeLifecycleMu.Lock()

@@ -2,15 +2,12 @@ package management
 
 import (
 	"context"
-	"crypto/sha256"
 	_ "embed"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -37,6 +34,9 @@ func (h *Handler) consoleBillingManager() (*consolebilling.Manager, error) {
 	defer h.consoleBillingMu.Unlock()
 	if h.consoleBilling != nil {
 		return h.consoleBilling, nil
+	}
+	if h.consoleBillingOwned {
+		return nil, errors.New("billing storage is unavailable")
 	}
 	h.mu.Lock()
 	path, cfg := h.configFilePath, h.cfg
@@ -350,47 +350,18 @@ func (h *Handler) billingCredential(id string) (*coreauth.Auth, string, bool) {
 }
 
 func billingCredentialProvider(auth *coreauth.Auth) (string, bool) {
-	if auth == nil || strings.TrimSpace(auth.Attributes["api_key"]) == "" {
-		return "", false
-	}
-	raw := strings.TrimSpace(auth.Attributes["base_url"])
-	if strings.EqualFold(auth.Provider, "claude") && officialBillingBase(raw, "api.anthropic.com", true) {
-		return "claude", true
-	}
-	if raw != "" && officialBillingBase(raw, "api.openai.com", false) {
-		return "openai", true
-	}
-	return "", false
+	return coreauth.BillingCredentialProvider(auth)
 }
-
-func officialBillingBase(raw, host string, allowEmpty bool) bool {
-	if raw == "" {
-		return allowEmpty
-	}
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Scheme != "https" || !strings.EqualFold(parsed.Host, host) || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.RawPath != "" {
-		return false
-	}
-	path := strings.TrimRight(parsed.Path, "/")
-	return path == "" || path == "/v1"
-}
-
 func billingCredentialFingerprint(auth *coreauth.Auth, provider string) string {
-	if auth == nil {
-		return ""
-	}
-	values := []string{provider, auth.Provider, auth.Attributes["api_key"], auth.Attributes["base_url"]}
-	var headers []string
-	for key, value := range auth.Attributes {
-		if strings.HasPrefix(key, "header:") {
-			headers = append(headers, key+"="+value)
-		}
-	}
-	sort.Strings(headers)
-	values = append(values, headers...)
-	encoded, _ := json.Marshal(values)
-	sum := sha256.Sum256(encoded)
-	return hex.EncodeToString(sum[:])
+	return coreauth.BillingCredentialFingerprint(auth, provider)
+}
+
+// SetConsoleBillingManager shares the service-owned store with management routes.
+func (h *Handler) SetConsoleBillingManager(manager *consolebilling.Manager) {
+	h.consoleBillingMu.Lock()
+	defer h.consoleBillingMu.Unlock()
+	h.consoleBilling = manager
+	h.consoleBillingOwned = true
 }
 
 // Organization/project selectors are the only custom headers allowed on this

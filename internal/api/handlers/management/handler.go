@@ -43,6 +43,7 @@ type Handler struct {
 	consoleBrowser          *consoleBrowserState
 	consoleBillingMu        sync.Mutex
 	consoleBilling          *consolebilling.Manager
+	consoleBillingOwned     bool
 	billingHTTPClient       *http.Client
 	cfg                     *config.Config
 	configFilePath          string

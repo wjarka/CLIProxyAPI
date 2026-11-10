@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/consolebilling"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/pluginhost"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers"
@@ -14,6 +15,8 @@ import (
 )
 
 type serverOptionConfig struct {
+	consoleBilling        *consolebilling.Manager
+	consoleBillingOwned   bool
 	extraMiddleware       []gin.HandlerFunc
 	engineConfigurator    func(*gin.Engine)
 	routerConfigurator    func(*gin.Engine, *handlers.BaseAPIHandler, *config.Config)
@@ -133,4 +136,9 @@ func WithExampleAPIKeySafeMode() ServerOption {
 	return func(cfg *serverOptionConfig) {
 		cfg.exampleAPIKeySafeMode = true
 	}
+}
+
+// WithConsoleBillingManager shares the lifecycle-owned billing store with management.
+func WithConsoleBillingManager(manager *consolebilling.Manager) ServerOption {
+	return func(cfg *serverOptionConfig) { cfg.consoleBilling = manager; cfg.consoleBillingOwned = true }
 }

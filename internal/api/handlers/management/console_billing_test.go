@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/consolebilling"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 )
 
@@ -197,5 +198,29 @@ func TestConsoleBillingRenamePreservesVerificationFingerprint(t *testing.T) {
 	auth.Label = "Personal account"
 	if before == "" || billingCredentialFingerprint(auth, "claude") != before {
 		t.Fatal("renaming a key must preserve its Console verification")
+	}
+}
+
+func TestConsoleBillingUsesServiceOwnedManager(t *testing.T) {
+	h := newBillingTestHandler(t)
+	manager, err := consolebilling.NewManager(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.SetConsoleBillingManager(manager)
+	actual, err := h.consoleBillingManager()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actual != manager {
+		t.Fatal("management opened a second store instead of sharing the service instance")
+	}
+}
+
+func TestConsoleBillingUnavailableServiceOwnerCannotCreatePrivateStore(t *testing.T) {
+	h := newBillingTestHandler(t)
+	h.SetConsoleBillingManager(nil)
+	if m, err := h.consoleBillingManager(); err == nil || m != nil {
+		t.Fatal("unavailable service store must not recover as an unobserved management-only store")
 	}
 }
