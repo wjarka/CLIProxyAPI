@@ -4,9 +4,11 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
@@ -100,11 +102,91 @@ func TestClaudeAuthManagerRotatesOnAPIKeyBadRequest(t *testing.T) {
 			default:
 				_, err = manager.Execute(ctx, []string{"claude"}, req, opts)
 			}
-			if !reflect.DeepEqual(calls, tc.wantCalls) {
+			if !slices.Equal(calls, tc.wantCalls) {
 				t.Fatalf("credentials tried = %v, want %v (error: %v)", calls, tc.wantCalls, err)
 			}
 			if (err == nil) != (len(tc.wantCalls) > 1) {
 				t.Fatalf("unexpected result: %v", err)
+			}
+		})
+	}
+}
+
+func TestClaudeSubscriptionQuotaCooldownSurvivesAPIKeyRotation(t *testing.T) {
+	const model = "claude-fable-5-2"
+	const subscriptionToken = "sk-ant-oat-test-subscription"
+	const emptyKey = "test-empty-key"
+	const fundedKey = "test-funded-key"
+	for _, window := range []string{"5h", "7d"} {
+		t.Run(window, func(t *testing.T) {
+			manager := cliproxyauth.NewManager(nil, nil, nil)
+			manager.RegisterExecutor(NewClaudeExecutor(&config.Config{}))
+			metadata := claudeOAuthTestMetadata()
+			metadata["access_token"] = subscriptionToken
+			subscription := &cliproxyauth.Auth{
+				ID:         t.Name() + "/subscription",
+				Provider:   "claude",
+				Attributes: map[string]string{"priority": "10"},
+				Metadata:   metadata,
+			}
+			for _, auth := range []*cliproxyauth.Auth{
+				subscription,
+				{ID: t.Name() + "/empty", Provider: "claude", Attributes: map[string]string{"priority": "2", "api_key": emptyKey}},
+				{ID: t.Name() + "/funded", Provider: "claude", Attributes: map[string]string{"priority": "1", "api_key": fundedKey}},
+			} {
+				reg := registry.GetGlobalRegistry()
+				reg.RegisterClient(auth.ID, "claude", []*registry.ModelInfo{{ID: model}})
+				t.Cleanup(func() { reg.UnregisterClient(auth.ID) })
+				if _, err := manager.Register(t.Context(), auth); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			reset := time.Now().Add(time.Hour).Truncate(time.Second)
+			var attempts []string
+			transport := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+				_ = req.Body.Close()
+				response := &http.Response{Header: make(http.Header)}
+				var body string
+				switch {
+				case req.Header.Get("Authorization") == "Bearer "+subscriptionToken:
+					attempts = append(attempts, "subscription")
+					response.StatusCode = http.StatusTooManyRequests
+					response.Header.Set("Anthropic-Ratelimit-Unified-Status", "rejected")
+					response.Header.Set("Anthropic-Ratelimit-Unified-"+window+"-Status", "rejected")
+					response.Header.Set("Anthropic-Ratelimit-Unified-"+window+"-Reset", strconv.FormatInt(reset.Unix(), 10))
+					body = `{"type":"error","error":{"type":"rate_limit_error","message":"Usage limit reached"}}`
+				case req.Header.Get("X-Api-Key") == emptyKey:
+					attempts = append(attempts, "empty key")
+					response.StatusCode = http.StatusBadRequest
+					body = `{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API."}}`
+				case req.Header.Get("X-Api-Key") == fundedKey:
+					attempts = append(attempts, "funded key")
+					response.StatusCode = http.StatusOK
+					body = `{"id":"msg_ok","type":"message","model":"claude-fable-5-2","role":"assistant","content":[{"type":"text","text":"ok"}]}`
+				default:
+					t.Fatal("unexpected upstream credential")
+				}
+				response.Body = io.NopCloser(strings.NewReader(body))
+				return response, nil
+			})
+			ctx := context.WithValue(t.Context(), "cliproxy.roundtripper", http.RoundTripper(transport))
+			request := cliproxyexecutor.Request{Model: model, Payload: []byte(`{"model":"claude-fable-5-2","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`)}
+			for i := 0; i < 2; i++ {
+				if _, err := manager.Execute(ctx, []string{"claude"}, request, cliproxyexecutor.Options{SourceFormat: sdktranslator.FormatClaude}); err != nil {
+					t.Fatalf("request %d: %v", i+1, err)
+				}
+			}
+			want := []string{"subscription", "empty key", "funded key", "empty key", "funded key"}
+			if !slices.Equal(attempts, want) {
+				t.Fatalf("upstream attempts = %v, want %v", attempts, want)
+			}
+			cooled, ok := manager.GetByID(subscription.ID)
+			if !ok {
+				t.Fatal("subscription disappeared after failover")
+			}
+			if !cooled.Unavailable || !cooled.Quota.Exceeded || cooled.Quota.NextRecoverAt.Before(reset) {
+				t.Fatalf("expected subscription to be cooled until %v, got %+v", reset, cooled.Quota)
 			}
 		})
 	}
