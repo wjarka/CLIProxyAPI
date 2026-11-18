@@ -180,10 +180,20 @@ func extractErrorBody(err error) string {
 	return err.Error()
 }
 
-// matchRequestScopedErrorAction evaluates an error against the auth's RequestScopedErrors rules.
-// If a rule matches, it returns (action, true).
-// If no rule matches, it returns ("", false).
+// matchRequestScopedErrorAction lets configured rules override the executor's
+// default of rotating without applying a cooldown.
 func matchRequestScopedErrorAction(auth *Auth, err error, cfg *internalconfig.Config) (string, bool) {
+	if action, ok := matchConfiguredRequestScopedErrorAction(auth, err, cfg); ok {
+		return action, true
+	}
+	var retry interface{ RetryOtherCredential() bool }
+	if errors.As(err, &retry) && retry.RetryOtherCredential() {
+		return RequestScopedActionContinue, true
+	}
+	return "", false
+}
+
+func matchConfiguredRequestScopedErrorAction(auth *Auth, err error, cfg *internalconfig.Config) (string, bool) {
 	if err == nil {
 		return "", false
 	}

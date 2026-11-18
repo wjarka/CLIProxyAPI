@@ -7,8 +7,10 @@ import (
 	"compress/gzip"
 	"compress/zlib"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -693,6 +695,31 @@ func (e claudeRateLimitError) IsRequestScoped() bool {
 // perfectly healthy for ordinary traffic. The refusal belongs to the request.
 func classifyClaudeUpstreamError(statusCode int, headers http.Header, body []byte) error {
 	return classifyClaudeUpstreamErrorWithCooling(statusCode, headers, body, false)
+}
+
+type claudeAPIKeyBadRequestError struct{ error }
+
+func (e claudeAPIKeyBadRequestError) Unwrap() error { return e.error }
+
+func (claudeAPIKeyBadRequestError) StatusCode() int { return http.StatusBadRequest }
+
+func (claudeAPIKeyBadRequestError) RetryOtherCredential() bool { return true }
+
+func (e *ClaudeExecutor) classifyUpstreamResponseError(auth *cliproxyauth.Auth, resp *http.Response, body []byte, fastRequest, bodyDecoded bool) error {
+	var err error
+	if fastRequest && bodyDecoded {
+		err = newClaudeFastDirectResponseError(resp, body)
+	} else {
+		err = classifyClaudeUpstreamErrorWithCooling(resp.StatusCode, resp.Header, body, e.modelLevelCooling())
+		err = wrapClaudeFastRequestError(fastRequest, resp.StatusCode, err)
+	}
+	if resp.StatusCode == http.StatusBadRequest && e.upstreamRequestLogProvider() == "claude" && auth.AuthKind() == cliproxyauth.AuthKindAPIKey {
+		apiKey, _ := claudeCreds(auth)
+		if !isClaudeOAuthToken(apiKey) {
+			return claudeAPIKeyBadRequestError{err}
+		}
+	}
+	return err
 }
 
 func classifyClaudeUpstreamErrorWithCooling(statusCode int, headers http.Header, body []byte, modelLevelCooling bool) error {
@@ -1477,7 +1504,37 @@ func applyClaudeHeadersWithNativeProfile(
 func doClaudeUpstreamRequest(client *http.Client, req *http.Request) (*http.Response, error) {
 	applyClaudeWireHeaderCasing(req)
 	cliproxyexecutor.MarkUpstreamAttempt(req.Context())
-	return client.Do(req)
+	retryClient := *client
+	transport := retryClient.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	retryClient.Transport = claudeDNSRetryTransport{transport}
+	return retryClient.Do(req)
+}
+
+type claudeDNSRetryTransport struct{ base http.RoundTripper }
+
+func (t claudeDNSRetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.base.RoundTrip(req)
+	var dnsErr *net.DNSError
+	if resp != nil || req.Context().Err() != nil || !errors.As(err, &dnsErr) || !(dnsErr.Timeout() || dnsErr.Temporary()) {
+		return resp, err
+	}
+	// A DNS failure occurs before the request reaches the upstream. Retry at
+	// the transport boundary to avoid replaying any preceding HTTP redirects.
+	retry := req.Clone(req.Context())
+	if req.Body != nil && req.Body != http.NoBody {
+		if req.GetBody == nil {
+			return resp, err
+		}
+		body, errBody := req.GetBody()
+		if errBody != nil {
+			return resp, err
+		}
+		retry.Body = body
+	}
+	return t.base.RoundTrip(retry)
 }
 
 // claudeWireHeaderCasing maps Go's canonical header name to the exact casing
