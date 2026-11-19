@@ -44,6 +44,8 @@ func (s *Server) registerManagementV8Routes() {
 	v8.POST("/billing/credentials/verify", s.mgmt.VerifyConsoleBillingCredential)
 	v8.GET("/billing/login-helper", s.mgmt.DownloadConsoleLoginHelper)
 
+	s.mgmt.RegisterZCodeRoutes(v8)
+
 	v8.GET("/server/latest-version", s.mgmt.GetLatestVersion)
 	v8.POST("/requests/api-call", s.mgmt.APICall)
 	v8.POST("/routing/cooldown/reset", s.mgmt.ResetQuota)

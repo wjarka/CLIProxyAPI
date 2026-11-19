@@ -46,7 +46,7 @@ func TestManagementV8RoutesShareAccessControl(t *testing.T) {
 			s := &Server{cfg: cfg, engine: gin.New(), mgmt: h}
 			s.managementRoutesEnabled.Store(tc.enabled)
 			s.registerManagementRoutes()
-			for routeIndex, route := range []string{"/v0/management/config", "/v8/management/config", "/v0/management/plugins", "/v8/management/plugins", "/v8/management/credentials/quota-overview", "/v8/management/billing", "/v8/management/billing/login-helper"} {
+			for routeIndex, route := range []string{"/v0/management/config", "/v8/management/config", "/v0/management/plugins", "/v8/management/plugins", "/v8/management/credentials/quota-overview", "/v8/management/billing", "/v8/management/billing/login-helper", "/v8/management/zcode/account"} {
 				req := httptest.NewRequest(http.MethodGet, route, nil)
 				req.RemoteAddr = fmt.Sprintf("127.0.0.%d:1234", routeIndex+1)
 				if tc.authorized {
@@ -95,6 +95,9 @@ func TestManagementV8IndependentContract(t *testing.T) {
 		"POST /v8/management/billing/connections/:id/refresh", "PUT /v8/management/billing/bindings",
 		"DELETE /v8/management/billing/bindings", "POST /v8/management/billing/credentials/verify",
 		"GET /v8/management/billing/login-helper",
+		"GET /v8/management/zcode/account", "DELETE /v8/management/zcode/account", "POST /v8/management/zcode/login",
+		"GET /v8/management/zcode/login/:id", "DELETE /v8/management/zcode/login/:id",
+		"GET /v8/management/zcode/reset-cards", "POST /v8/management/zcode/reset-cards/use",
 		"GET /v8/management/oauth/auth-url", "POST /v8/management/oauth/import", "POST /v8/management/oauth/callback",
 		"POST /v8/management/routing/cooldown/reset",
 		"GET /v8/management/plugins/:id/quota", "POST /v8/management/plugins/:id/quota", "DELETE /v8/management/plugins/:id/quota",
@@ -129,6 +132,12 @@ func TestManagementV8IndependentContract(t *testing.T) {
 		}
 		request(route.method, route.path, "", http.StatusNotFound)
 	}
+	if got := request(http.MethodGet, "/v8/management/zcode/account", "", http.StatusOK); got != `{"connected":false}` {
+		t.Fatalf("unconnected ZCode account: %s", got)
+	}
+	request(http.MethodGet, "/v0/management/zcode/account", "", http.StatusNotFound)
+	request(http.MethodGet, "/v8/management/zcode/reset-cards", "", http.StatusConflict)
+	request(http.MethodPost, "/v8/management/zcode/reset-cards/use", "{}", http.StatusBadRequest)
 	request(http.MethodPost, "/v8/management/oauth/providers/vertex/import", "", http.StatusNotFound)
 	for _, tc := range []struct {
 		method, url, body string

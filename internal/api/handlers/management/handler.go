@@ -20,6 +20,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/consolebrowser"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/pluginhost"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/pluginstore"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/zcode"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v8/sdk/auth"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
@@ -40,6 +41,7 @@ const attemptMaxIdleTime = 2 * time.Hour
 
 // Handler aggregates config reference, persistence path and helpers.
 type Handler struct {
+	zcode                   *zcode.Service
 	consoleBrowser          *consoleBrowserState
 	consoleBillingMu        sync.Mutex
 	consoleBilling          *consolebilling.Manager
@@ -91,6 +93,9 @@ func NewHandler(cfg *config.Config, configFilePath string, manager *coreauth.Man
 	}
 	if client := consolebrowser.NewClientFromEnv(); client != nil {
 		h.consoleBrowser = newConsoleBrowserState(client)
+	}
+	if configFilePath != "" {
+		h.zcode = zcode.New(filepath.Join(filepath.Dir(configFilePath), "zcode", "account.json"))
 	}
 	h.startAttemptCleanup()
 	return h
