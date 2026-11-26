@@ -138,7 +138,7 @@ func (s *Store) Observe(o PoolObservation) error {
 		} else {
 			if previous.State != "uncertain" {
 				previous.State = "completed"
-				if o.StartAt == nil {
+				if o.StartAt == nil && o.ResetAt.Sub(previous.ResetAt) == 7*24*time.Hour {
 					start := previous.ResetAt
 					o.StartAt = &start
 				}
@@ -288,5 +288,13 @@ func (s *Store) writeLocked() error {
 	if err = f.Close(); err != nil {
 		return err
 	}
-	return os.Rename(name, s.path)
+	if err = os.Rename(name, s.path); err != nil {
+		return err
+	}
+	parent, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = parent.Close() }()
+	return parent.Sync()
 }

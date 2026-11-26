@@ -52,6 +52,21 @@ func TestStoreRetainsLastObservationAcrossRestart(t *testing.T) {
 	}
 }
 
+func TestStoreDoesNotInventStartAcrossMissedWeeks(t *testing.T) {
+	at := time.Now()
+	s, _ := NewStore(filepath.Join(t.TempDir(), "h.json"), Retention)
+	old := testObservation(at, number(23))
+	_ = s.Observe(old)
+	next := old
+	next.ObservedAt = old.ResetAt.Add(14 * 24 * time.Hour)
+	next.ResetAt = old.ResetAt.Add(21 * 24 * time.Hour)
+	_ = s.Observe(next)
+	cycles := s.Snapshot(at.Add(-time.Hour), next.ResetAt.Add(time.Hour)).Cycles
+	if len(cycles) != 2 || cycles[1].StartAt != nil {
+		t.Fatal("invented multiweek cycle", cycles)
+	}
+}
+
 func TestStoreUnknownIsNotZeroAndOlderReadingCannotReplace(t *testing.T) {
 	at := time.Now().UTC().Truncate(time.Second)
 	s, _ := NewStore(filepath.Join(t.TempDir(), "h.json"), 52*7*24*time.Hour)
