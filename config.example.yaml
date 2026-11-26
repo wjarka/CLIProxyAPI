@@ -1095,6 +1095,13 @@ multimedia:
 
 # Application logs, request logs, usage aggregation, and profiling.
 observability:
+  # Retain the last observed unused weekly allowance without an open dashboard.
+  # Keep this file outside auth-dir, on durable storage. Path changes need restart.
+  quota-history:
+    enabled: true
+    path: quota-history.json
+    retention-weeks: 52
+
   logs:
     # Enable debug logging
     debug: false
