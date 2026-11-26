@@ -6,6 +6,26 @@ import (
 	"testing"
 )
 
+func TestEmbeddedClaudeCatalogIncludesFable52BeforeRemoteLoad(t *testing.T) {
+	var catalog staticModelsJSON
+	if err := json.Unmarshal(embeddedModelsJSON, &catalog); err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range catalog.Claude {
+		if model.ID != "claude-fable-5-2" {
+			continue
+		}
+		if model.ContextLength != 1000000 || model.MaxCompletionTokens != 128000 {
+			t.Fatalf("unexpected Fable 5.2 limits: context=%d output=%d", model.ContextLength, model.MaxCompletionTokens)
+		}
+		if model.Thinking == nil || !model.Thinking.DynamicAllowed || model.Thinking.ZeroAllowed {
+			t.Fatalf("unexpected Fable 5.2 thinking capabilities: %#v", model.Thinking)
+		}
+		return
+	}
+	t.Fatal("Fable 5.2 is absent from the embedded Claude catalog used before remote loading")
+}
+
 func TestClaudeHaiku55SurvivesMissingCatalogEntry(t *testing.T) {
 	models := GetClaudeModels()
 	var haiku *ModelInfo
