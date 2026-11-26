@@ -46,7 +46,7 @@ func TestManagementV8RoutesShareAccessControl(t *testing.T) {
 			s := &Server{cfg: cfg, engine: gin.New(), mgmt: h}
 			s.managementRoutesEnabled.Store(tc.enabled)
 			s.registerManagementRoutes()
-			for routeIndex, route := range []string{"/v0/management/config", "/v8/management/config", "/v0/management/plugins", "/v8/management/plugins", "/v8/management/credentials/quota-overview", "/v8/management/billing", "/v8/management/billing/login-helper", "/v8/management/zcode/account"} {
+			for routeIndex, route := range []string{"/v0/management/config", "/v8/management/config", "/v0/management/plugins", "/v8/management/plugins", "/v8/management/credentials/quota-overview", "/v8/management/credentials/quota-history", "/v8/management/billing", "/v8/management/billing/login-helper", "/v8/management/zcode/account"} {
 				req := httptest.NewRequest(http.MethodGet, route, nil)
 				req.RemoteAddr = fmt.Sprintf("127.0.0.%d:1234", routeIndex+1)
 				if tc.authorized {
@@ -90,6 +90,7 @@ func TestManagementV8IndependentContract(t *testing.T) {
 		"GET /v0/management/debug", "PUT /v0/management/request-retry", "GET /v0/management/auth-files",
 		"GET /v8/management/observability/logs", "GET /v8/management/observability/usage/queue",
 		"GET /v8/management/credentials", "POST /v8/management/credentials",
+		"GET /v8/management/credentials/quota-history", "POST /v8/management/credentials/quota-history/refresh",
 		"GET /v8/management/billing", "POST /v8/management/billing/connections",
 		"PATCH /v8/management/billing/connections/:id", "DELETE /v8/management/billing/connections/:id",
 		"POST /v8/management/billing/connections/:id/refresh", "PUT /v8/management/billing/bindings",

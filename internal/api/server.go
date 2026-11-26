@@ -291,6 +291,8 @@ func (s *Server) Start() error {
 	if s == nil || s.server == nil {
 		return fmt.Errorf("failed to start HTTP server: server not initialized")
 	}
+	s.mgmt.StartQuotaHistory(context.Background())
+	defer s.mgmt.StopQuotaHistory()
 
 	addr := s.server.Addr
 	listener, errListen := net.Listen("tcp", addr)
@@ -410,6 +412,7 @@ func (s *Server) Start() error {
 //   - error: An error if the server fails to stop
 func (s *Server) Stop(ctx context.Context) error {
 	log.Debug("Stopping API server...")
+	s.mgmt.StopQuotaHistory()
 
 	if s.keepAliveEnabled {
 		select {

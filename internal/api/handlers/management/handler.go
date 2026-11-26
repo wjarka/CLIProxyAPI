@@ -20,6 +20,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/consolebrowser"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/pluginhost"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/pluginstore"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/quotahistory"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/zcode"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v8/sdk/auth"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
@@ -41,6 +42,13 @@ const attemptMaxIdleTime = 2 * time.Hour
 
 // Handler aggregates config reference, persistence path and helpers.
 type Handler struct {
+	historyMu               sync.Mutex
+	history                 *quotahistory.Collector
+	historyStore            *quotahistory.Store
+	historyCancel           context.CancelFunc
+	historyContext          context.Context
+	historyDone             chan struct{}
+	historyHTTPClient       *http.Client
 	zcode                   *zcode.Service
 	consoleBrowser          *consoleBrowserState
 	consoleBillingMu        sync.Mutex

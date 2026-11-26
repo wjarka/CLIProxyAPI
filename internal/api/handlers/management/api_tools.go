@@ -22,6 +22,38 @@ import (
 
 const defaultAPICallTimeout = 60 * time.Second
 
+// Background metadata reads follow the same bounded management APICall policy,
+// including Claude's shared cache reader. This never changes inference deadlines.
+func quotaHistoryReadContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, defaultAPICallTimeout)
+}
+
+// quotaHistoryRequest shares the management metadata-read timeout and transport
+// policy. It never sends inference, reset or login requests.
+func (h *Handler) quotaHistoryRequest(ctx context.Context, auth *coreauth.Auth, method, endpoint string, headers map[string]string, body string) ([]byte, http.Header, int, error) {
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, strings.NewReader(body))
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	client := h.historyHTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: defaultAPICallTimeout, Transport: h.apiCallTransport(auth, "")}
+	}
+	response, err := client.Do(req)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	defer func() { _ = response.Body.Close() }()
+	data, err := io.ReadAll(io.LimitReader(response.Body, (1<<20)+1))
+	if len(data) > 1<<20 {
+		return nil, nil, 0, fmt.Errorf("quota response too large")
+	}
+	return data, response.Header, response.StatusCode, err
+}
+
 const (
 	antigravityOAuthClientID     = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
 	antigravityOAuthClientSecret = "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"
@@ -155,6 +187,10 @@ func (h *Handler) APICall(c *gin.Context) {
 			kind = coreauth.ClaudeUsageGrantStatus
 		}
 		result := h.authManager.ReadClaudeUsage(ctx, auth.ID, kind)
+		if !grants && result.StatusCode == http.StatusOK {
+			request, _ := http.NewRequestWithContext(ctx, http.MethodGet, coreauth.ClaudeUsageURL, nil)
+			h.observeHistoryAPICall(auth, request, "", []byte(result.Body), result.ObservedAt)
+		}
 		header := make(http.Header)
 		if !result.RetryAt.IsZero() {
 			header.Set("Retry-After", result.RetryAt.UTC().Format(http.TimeFormat))
@@ -275,6 +311,9 @@ func (h *Handler) APICall(c *gin.Context) {
 		if json.Unmarshal(respBody, &claim) == nil && (claim.Result == "reset" || claim.Result == "already_used") {
 			h.authManager.InvalidateClaudeUsage(auth)
 		}
+	}
+	if c.GetBool(ConfigV8ContextKey) && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		h.observeHistoryAPICall(auth, req, body.Data, respBody, time.Now().UTC())
 	}
 
 	c.JSON(http.StatusOK, apiCallResponse{
