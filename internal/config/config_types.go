@@ -12,6 +12,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// QuotaHistoryConfig controls read-only collection and durable weekly history.
+// Nil Enabled and zero RetentionWeeks select the default enabled/52-week policy.
+type QuotaHistoryConfig struct {
+	Enabled        *bool  `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	Path           string `yaml:"path,omitempty" json:"path,omitempty"`
+	RetentionWeeks int    `yaml:"retention-weeks,omitempty" json:"retention-weeks,omitempty"`
+}
+
 // RequestScopedErrorRule configures custom classification and handling for upstream errors.
 type RequestScopedErrorRule struct {
 	// Status matches the HTTP status code of the upstream response (e.g. 400).

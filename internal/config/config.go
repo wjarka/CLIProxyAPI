@@ -6,6 +6,7 @@ package config
 
 // Config represents the application's configuration, loaded from a YAML file.
 type Config struct {
+	QuotaHistory QuotaHistoryConfig `yaml:"quota-history" json:"quota-history"`
 	// Models selects optional catalog sources independently for each catalog.
 	Models ModelCatalogs `yaml:"models" json:"models"`
 
