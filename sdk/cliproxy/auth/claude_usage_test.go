@@ -119,3 +119,89 @@ func TestClaudeGrantPreflightBypassesFreshSnapshotButHonorsBackoff(t *testing.T)
 		t.Fatalf("preflight bypassed backoff: %+v, calls=%d", blocked, calls.Load())
 	}
 }
+
+func TestClaudeUsageGuardSharesCacheAndExpiresAtFiveHourReset(t *testing.T) {
+	for _, weekly := range []bool{false, true} {
+		t.Run(fmt.Sprint(weekly), func(t *testing.T) {
+			var calls atomic.Int32
+			reset := time.Now().Add(30 * time.Second).UTC().Truncate(time.Second)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				fmt.Fprintf(w, `{"five_hour":{"utilization":10,"resets_at":%q}`, reset.Format(time.RFC3339))
+				if weekly {
+					fmt.Fprintf(w, `,"seven_day":{"utilization":1,"resets_at":%q}`, reset.Add(5*24*time.Hour).Format(time.RFC3339))
+				}
+				fmt.Fprint(w, "}")
+			}))
+			defer server.Close()
+			endpoint, _ := url.Parse(server.URL)
+			m := NewManager(nil, nil, nil)
+			defer m.StopAutoRefresh()
+			m.SetConfig(usageAlwaysTestConfig(t))
+			m.RegisterExecutor(&reserveUsageExecutor{endpoint: endpoint})
+			work, err := m.Register(WithSkipPersist(context.Background()), &Auth{ID: "work.json", Provider: "claude", Status: StatusActive})
+			if err != nil {
+				t.Fatal(err)
+			}
+			first := m.ReadClaudeUsage(context.Background(), work.ID, ClaudeUsageQuota)
+			if first.StatusCode != 200 || !first.freshUntil.Equal(reset) {
+				t.Fatalf("cache expiry=%v want %v", first.freshUntil, reset)
+			}
+			status := m.QuotaUsageStatus(work, time.Now())
+			if status.UsedPercent == nil || *status.UsedPercent != 10 || status.Blocked {
+				t.Fatalf("valid five-hour usage not available: %+v", status)
+			}
+			m.ReadClaudeUsage(context.Background(), work.ID, ClaudeUsageQuota)
+			if calls.Load() != 1 {
+				t.Fatalf("guard reader did not share cached usage: %d calls", calls.Load())
+			}
+		})
+	}
+}
+
+func TestClaudeUsageExpiredFiveHourDoesNotDisableWeeklyCache(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		fmt.Fprintf(w, `{"five_hour":{"utilization":70,"resets_at":%q},"seven_day":{"utilization":5,"resets_at":%q}}`, time.Now().Add(-time.Minute).Format(time.RFC3339), time.Now().Add(24*time.Hour).Format(time.RFC3339))
+	}))
+	defer server.Close()
+	endpoint, _ := url.Parse(server.URL)
+	m := NewManager(nil, nil, nil)
+	defer m.StopAutoRefresh()
+	m.SetConfig(reserveTestConfig(t))
+	m.RegisterExecutor(&reserveUsageExecutor{endpoint: endpoint})
+	work, err := m.Register(WithSkipPersist(context.Background()), &Auth{ID: "work.json", Provider: "claude", Status: StatusActive})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.ReadClaudeUsage(context.Background(), work.ID, ClaudeUsageQuota)
+	m.ReadClaudeUsage(context.Background(), work.ID, ClaudeUsageQuota)
+	if calls.Load() != 1 {
+		t.Fatalf("expired short window disabled cache: %d reads", calls.Load())
+	}
+}
+
+func TestClaudeUsagePartialFiveHourPreservesWeeklyGrace(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"five_hour":{"utilization":10,"resets_at":%q}}`, time.Now().Add(time.Hour).Format(time.RFC3339))
+	}))
+	defer server.Close()
+	endpoint, _ := url.Parse(server.URL)
+	m := NewManager(nil, nil, nil)
+	defer m.StopAutoRefresh()
+	m.SetConfig(reserveTestConfig(t))
+	m.RegisterExecutor(&reserveUsageExecutor{endpoint: endpoint})
+	now := time.Now()
+	work, err := m.Register(WithSkipPersist(context.Background()), &Auth{ID: "work.json", Provider: "claude", Status: StatusActive})
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := reserveTestAuth(now.Add(-2*time.Minute), now.Add(6*24*time.Hour), "0.01")
+	m.reserveQuotaObservations.Store(work.ID, reserveQuotaObservation{epoch: work.RegistrationEpoch, quota: old.Quota})
+	m.ReadClaudeUsage(context.Background(), work.ID, ClaudeUsageQuota)
+	status := m.QuotaReserveStatus(work, time.Now())
+	if status == nil || status.Blocked || !status.Stale || !status.ObservedAt.Equal(old.Quota.ObservedAt) {
+		t.Fatalf("partial response discarded or redated weekly snapshot: %+v", status)
+	}
+}

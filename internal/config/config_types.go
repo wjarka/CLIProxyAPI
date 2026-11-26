@@ -352,7 +352,9 @@ type QuotaExceeded struct {
 type RoutingConfig struct {
 	// ReservePolicies protect weekly capacity until scheduled release deadlines.
 	ReservePolicies map[string]ReservePolicy `yaml:"reserve-policies,omitempty" json:"reserve-policies,omitempty"`
-	// AccountPolicies bind stable credential IDs to named reserve policies.
+	// UsagePolicies limit five-hour consumption during scheduled working hours.
+	UsagePolicies map[string]UsagePolicy `yaml:"usage-policies,omitempty" json:"usage-policies,omitempty"`
+	// AccountPolicies bind stable credential IDs to named quota policies.
 	AccountPolicies []AccountReservePolicy `yaml:"account-policies,omitempty" json:"account-policies,omitempty"`
 
 	// Strategy selects the credential selection strategy.

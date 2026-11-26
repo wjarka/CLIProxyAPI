@@ -31,6 +31,9 @@ func (h *Handler) GetQuotaOverview(c *gin.Context) {
 			if reserve := h.authManager.QuotaReserveStatus(auth, now); reserve != nil {
 				row["reserve"] = reserve
 			}
+			if usage := h.authManager.QuotaUsageStatus(auth, now); usage != nil {
+				row["usage_policy"] = usage
+			}
 			if !retry.IsZero() {
 				row["retry_at"] = retry
 			}
